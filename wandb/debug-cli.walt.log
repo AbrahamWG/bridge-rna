@@ -1,0 +1,347 @@
+2026-03-13 01:20:19 INFO Running runs: []
+2026-03-13 01:20:19 INFO Agent received command: run
+2026-03-13 01:20:19 INFO Agent starting run with config:
+	batch_size: 32
+	feature_type: elu+1
+	ffn_dim: 512
+	hidden_dim: 512
+	learning_rate: 0.0004368655425669898
+	mask_ratio: 0.15
+	num_heads: 4
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-13 01:20:19 INFO About to run command: sweep_train.sh
+2026-03-13 01:20:20 ERROR Exception while processing command: {'run_id': 'w8r9erkx', 'program': 'sweep_train.sh', 'type': 'run', 'args': {'batch_size': {'value': 32}, 'feature_type': {'value': 'elu+1'}, 'ffn_dim': {'value': 512}, 'hidden_dim': {'value': 512}, 'learning_rate': {'value': 0.0004368655425669898}, 'mask_ratio': {'value': 0.15}, 'num_heads': {'value': 4}, 'num_layers': {'value': 2}, 'ree_base': {'value': 100}, 'weight_decay': {'value': 0}}, 'runqueue_item_id': 'UnVuUXVldWVJdGVtOjcxMjU2MTkxNw==', 'logs': ['expected_improvement: nan', 'predicted_value: 0.0', 'predicted_value_std_dev: nan', 'success_probability: 1.0', 'warnings: \nSweep has no valid samples of the metric.'], 'run_storage_id': 'UnVuOnYxOnc4cjllcmt4OnVuY2F0ZWdvcml6ZWQ6d2FsdF8='}
+Traceback (most recent call last):
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 410, in _process_command
+    result = self._command_run(command)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 505, in _command_run
+    proc = AgentProcess(
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 98, in __init__
+    self._popen = subprocess.Popen(
+  File "/usr/lib/python3.10/subprocess.py", line 971, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.10/subprocess.py", line 1863, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'sweep_train.sh'
+2026-03-13 01:20:26 INFO Agent received command: run
+2026-03-13 01:20:26 INFO Agent starting run with config:
+	batch_size: 16
+	feature_type: relu
+	ffn_dim: 2048
+	hidden_dim: 128
+	learning_rate: 0.00016624082238417555
+	mask_ratio: 0.3
+	num_heads: 4
+	num_layers: 4
+	ree_base: 10000
+	weight_decay: 1e-05
+2026-03-13 01:20:26 INFO About to run command: sweep_train.sh
+2026-03-13 01:20:26 ERROR Exception while processing command: {'run_id': 'b1aju9jl', 'program': 'sweep_train.sh', 'type': 'run', 'args': {'batch_size': {'value': 16}, 'feature_type': {'value': 'relu'}, 'ffn_dim': {'value': 2048}, 'hidden_dim': {'value': 128}, 'learning_rate': {'value': 0.00016624082238417555}, 'mask_ratio': {'value': 0.3}, 'num_heads': {'value': 4}, 'num_layers': {'value': 4}, 'ree_base': {'value': 10000}, 'weight_decay': {'value': 1e-05}}, 'runqueue_item_id': 'UnVuUXVldWVJdGVtOjcxMjU5MTA1OQ==', 'logs': ['expected_improvement: nan', 'predicted_value: 0.0', 'predicted_value_std_dev: nan', 'success_probability: 1.0', 'warnings: \nSweep has no valid samples of the metric.'], 'run_storage_id': 'UnVuOnYxOmIxYWp1OWpsOnVuY2F0ZWdvcml6ZWQ6d2FsdF8='}
+Traceback (most recent call last):
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 410, in _process_command
+    result = self._command_run(command)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 505, in _command_run
+    proc = AgentProcess(
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 98, in __init__
+    self._popen = subprocess.Popen(
+  File "/usr/lib/python3.10/subprocess.py", line 971, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.10/subprocess.py", line 1863, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'sweep_train.sh'
+2026-03-13 01:20:31 INFO Agent received command: run
+2026-03-13 01:20:31 INFO Agent starting run with config:
+	batch_size: 16
+	feature_type: sqr
+	ffn_dim: 1024
+	hidden_dim: 256
+	learning_rate: 0.0007140462212453727
+	mask_ratio: 0.1
+	num_heads: 4
+	num_layers: 2
+	ree_base: 1000
+	weight_decay: 0.001
+2026-03-13 01:20:31 INFO About to run command: sweep_train.sh
+2026-03-13 01:20:31 ERROR Exception while processing command: {'run_id': '4dint8ui', 'program': 'sweep_train.sh', 'type': 'run', 'args': {'batch_size': {'value': 16}, 'feature_type': {'value': 'sqr'}, 'ffn_dim': {'value': 1024}, 'hidden_dim': {'value': 256}, 'learning_rate': {'value': 0.0007140462212453727}, 'mask_ratio': {'value': 0.1}, 'num_heads': {'value': 4}, 'num_layers': {'value': 2}, 'ree_base': {'value': 1000}, 'weight_decay': {'value': 0.001}}, 'runqueue_item_id': 'UnVuUXVldWVJdGVtOjcxMjU5MTA4NA==', 'logs': ['expected_improvement: nan', 'predicted_value: 0.0', 'predicted_value_std_dev: nan', 'success_probability: 1.0', 'warnings: \nSweep has no valid samples of the metric.'], 'run_storage_id': 'UnVuOnYxOjRkaW50OHVpOnVuY2F0ZWdvcml6ZWQ6d2FsdF8='}
+Traceback (most recent call last):
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 410, in _process_command
+    result = self._command_run(command)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 505, in _command_run
+    proc = AgentProcess(
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 98, in __init__
+    self._popen = subprocess.Popen(
+  File "/usr/lib/python3.10/subprocess.py", line 971, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/usr/lib/python3.10/subprocess.py", line 1863, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'sweep_train.sh'
+2026-03-13 12:12:55 ERROR Traceback (most recent call last):
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/apis/normalize.py", line 28, in wrapper
+    return func(*args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/sdk/internal/internal_api.py", line 1162, in sweep
+    raise ValueError(f"Sweep {entity}/{project}/{sweep} not found")
+ValueError: Sweep walt_/expression-performer/4de5eeaw not found
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/cli/cli.py", line 150, in wrapper
+    return func(*args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/cli/cli.py", line 1766, in agent
+    wandb_agent.agent(
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 669, in agent
+    return run_agent(
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 622, in run_agent
+    agent.run()
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 277, in run
+    sweep_obj = self._api.sweep(self._sweep_id, "{}")
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/apis/internal.py", line 125, in sweep
+    return self.api.sweep(*args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/apis/normalize.py", line 82, in wrapper
+    raise CommError(message, err).with_traceback(sys.exc_info()[2])
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/apis/normalize.py", line 28, in wrapper
+    return func(*args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/sdk/internal/internal_api.py", line 1162, in sweep
+    raise ValueError(f"Sweep {entity}/{project}/{sweep} not found")
+wandb.errors.errors.CommError: Sweep walt_/expression-performer/4de5eeaw not found
+Traceback (most recent call last):
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/apis/normalize.py", line 28, in wrapper
+    return func(*args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/sdk/internal/internal_api.py", line 1162, in sweep
+    raise ValueError(f"Sweep {entity}/{project}/{sweep} not found")
+ValueError: Sweep walt_/expression-performer/4de5eeaw not found
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/cli/cli.py", line 150, in wrapper
+    return func(*args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/cli/cli.py", line 1766, in agent
+    wandb_agent.agent(
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 669, in agent
+    return run_agent(
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 622, in run_agent
+    agent.run()
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/wandb_agent.py", line 277, in run
+    sweep_obj = self._api.sweep(self._sweep_id, "{}")
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/apis/internal.py", line 125, in sweep
+    return self.api.sweep(*args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/apis/normalize.py", line 82, in wrapper
+    raise CommError(message, err).with_traceback(sys.exc_info()[2])
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/apis/normalize.py", line 28, in wrapper
+    return func(*args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/sdk/internal/internal_api.py", line 1162, in sweep
+    raise ValueError(f"Sweep {entity}/{project}/{sweep} not found")
+wandb.errors.errors.CommError: Sweep walt_/expression-performer/4de5eeaw not found
+2026-03-13 12:13:14 INFO Running runs: []
+2026-03-13 12:13:15 INFO Agent received command: run
+2026-03-13 12:13:15 INFO Agent starting run with config:
+	batch_size: 16
+	feature_type: sqr
+	ffn_dim: 2048
+	hidden_dim: 256
+	learning_rate: 1.0497036636292303e-05
+	mask_ratio: 0.2
+	num_heads: 8
+	num_layers: 6
+	ree_base: 10000
+	weight_decay: 0
+2026-03-13 12:13:15 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 12:13:20 INFO Running runs: ['zipihd5p']
+2026-03-13 12:16:39 INFO Cleaning up finished run: zipihd5p
+2026-03-13 12:16:40 INFO Agent received command: run
+2026-03-13 12:16:40 INFO Agent starting run with config:
+	batch_size: 32
+	feature_type: relu
+	ffn_dim: 1024
+	hidden_dim: 128
+	learning_rate: 5.236275278435739e-05
+	mask_ratio: 0.2
+	num_heads: 4
+	num_layers: 4
+	ree_base: 100
+	weight_decay: 0.0001
+2026-03-13 12:16:40 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 12:16:45 INFO Running runs: ['r35qyx7k']
+2026-03-13 12:17:58 INFO Running runs: []
+2026-03-13 12:17:58 INFO Agent received command: run
+2026-03-13 12:17:58 INFO Agent starting run with config:
+	batch_size: 16
+	feature_type: relu
+	ffn_dim: 512
+	hidden_dim: 128
+	learning_rate: 2.0926193281209613e-05
+	mask_ratio: 0.3
+	num_heads: 8
+	num_layers: 2
+	ree_base: 1000
+	weight_decay: 0
+2026-03-13 12:17:58 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 12:18:03 INFO Running runs: ['elm9mj97']
+2026-03-13 13:23:54 INFO Cleaning up finished run: elm9mj97
+2026-03-13 13:23:55 INFO Agent received command: run
+2026-03-13 13:23:55 INFO Agent starting run with config:
+	batch_size: 16
+	feature_type: elu+1
+	ffn_dim: 512
+	hidden_dim: 256
+	learning_rate: 2.3293177668359543e-05
+	mask_ratio: 0.3
+	num_heads: 4
+	num_layers: 6
+	ree_base: 10000
+	weight_decay: 1e-05
+2026-03-13 13:23:55 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 13:24:00 INFO Running runs: ['p18poixo']
+2026-03-13 15:09:37 INFO Cleaning up finished run: p18poixo
+2026-03-13 15:09:38 INFO Agent received command: run
+2026-03-13 15:09:38 INFO Agent starting run with config:
+	batch_size: 32
+	feature_type: sqr
+	ffn_dim: 2048
+	hidden_dim: 256
+	learning_rate: 0.00017285014878790363
+	mask_ratio: 0.3
+	num_heads: 4
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 1e-05
+2026-03-13 15:09:38 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 15:09:43 INFO Running runs: ['5p4xvvlo']
+2026-03-13 15:13:23 INFO Cleaning up finished run: 5p4xvvlo
+2026-03-13 15:13:24 INFO Agent received command: run
+2026-03-13 15:13:24 INFO Agent starting run with config:
+	batch_size: 8
+	feature_type: sqr
+	ffn_dim: 1024
+	hidden_dim: 128
+	learning_rate: 0.00010134266339014714
+	mask_ratio: 0.1
+	num_heads: 8
+	num_layers: 2
+	ree_base: 10
+	weight_decay: 0
+2026-03-13 15:13:24 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 15:13:29 INFO Running runs: ['zjfy7pt8']
+2026-03-13 17:16:21 INFO Cleaning up finished run: zjfy7pt8
+2026-03-13 17:16:22 INFO Agent received command: run
+2026-03-13 17:16:22 INFO Agent starting run with config:
+	batch_size: 16
+	feature_type: sqr
+	ffn_dim: 1024
+	hidden_dim: 256
+	learning_rate: 5.8992233339534456e-05
+	mask_ratio: 0.1
+	num_heads: 8
+	num_layers: 2
+	ree_base: 10
+	weight_decay: 0
+2026-03-13 17:16:22 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 17:16:27 INFO Running runs: ['czo2y5i7']
+2026-03-13 18:28:54 INFO Cleaning up finished run: czo2y5i7
+2026-03-13 18:28:55 INFO Agent received command: run
+2026-03-13 18:28:55 INFO Agent starting run with config:
+	batch_size: 8
+	feature_type: relu
+	ffn_dim: 1024
+	hidden_dim: 512
+	learning_rate: 0.00012532421477356464
+	mask_ratio: 0.15
+	num_heads: 8
+	num_layers: 2
+	ree_base: 10
+	weight_decay: 0
+2026-03-13 18:28:55 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 18:29:00 INFO Running runs: ['spfvccsp']
+2026-03-13 21:32:10 INFO Cleaning up finished run: spfvccsp
+2026-03-13 21:32:11 INFO Agent received command: run
+2026-03-13 21:32:11 INFO Agent starting run with config:
+	batch_size: 16
+	feature_type: relu
+	ffn_dim: 512
+	hidden_dim: 512
+	learning_rate: 0.0007456270524494841
+	mask_ratio: 0.1
+	num_heads: 8
+	num_layers: 4
+	ree_base: 10
+	weight_decay: 0
+2026-03-13 21:32:11 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 21:32:16 INFO Running runs: ['5i980g4s']
+2026-03-13 21:35:35 INFO Cleaning up finished run: 5i980g4s
+2026-03-13 21:35:35 INFO Agent received command: run
+2026-03-13 21:35:35 INFO Agent starting run with config:
+	batch_size: 16
+	feature_type: relu
+	ffn_dim: 2048
+	hidden_dim: 512
+	learning_rate: 3.969916416056332e-05
+	mask_ratio: 0.15
+	num_heads: 8
+	num_layers: 2
+	ree_base: 10
+	weight_decay: 0
+2026-03-13 21:35:35 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-13 21:35:40 INFO Running runs: ['2693w929']
+2026-03-14 00:19:03 INFO Running runs: []
+2026-03-14 00:19:03 INFO Agent received command: run
+2026-03-14 00:19:03 INFO Agent starting run with config:
+	batch_size: 4
+	feature_type: favor+
+	ffn_dim: 1536
+	hidden_dim: 384
+	learning_rate: 0.0002
+	mask_ratio: 0.1
+	num_heads: 8
+	num_layers: 2
+	ree_base: 50
+	weight_decay: 0
+2026-03-14 00:19:03 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-14 00:19:08 INFO Running runs: ['g0osbc7v']
+2026-03-14 04:49:44 INFO Cleaning up finished run: g0osbc7v
+2026-03-14 04:49:45 INFO Agent received command: run
+2026-03-14 04:49:45 INFO Agent starting run with config:
+	batch_size: 4
+	feature_type: favor+
+	ffn_dim: 1024
+	hidden_dim: 256
+	learning_rate: 0.0001
+	mask_ratio: 0.15
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-14 04:49:45 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-14 04:49:50 INFO Running runs: ['6305cvve']
+2026-03-14 09:16:00 INFO Cleaning up finished run: 6305cvve
+2026-03-14 09:16:02 INFO Agent received command: run
+2026-03-14 09:16:02 INFO Agent starting run with config:
+	batch_size: 8
+	feature_type: favor+
+	ffn_dim: 1024
+	hidden_dim: 256
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	num_heads: 8
+	num_layers: 2
+	ree_base: 200
+	weight_decay: 0.01
+2026-03-14 09:16:02 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-14 09:16:07 INFO Running runs: ['fl0oilue']
+2026-03-14 11:32:02 INFO Cleaning up finished run: fl0oilue
+2026-03-14 11:32:03 INFO Agent received command: run
+2026-03-14 11:32:03 INFO Agent starting run with config:
+	batch_size: 8
+	feature_type: favor+
+	ffn_dim: 1536
+	hidden_dim: 256
+	learning_rate: 5e-05
+	mask_ratio: 0.15
+	num_heads: 8
+	num_layers: 2
+	ree_base: 50
+	weight_decay: 0.01
+2026-03-14 11:32:03 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-14 11:32:08 INFO Running runs: ['ngkrhv7p']

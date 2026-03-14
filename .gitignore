@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+
+# environments
+venv/
+.env
+*.env
+
+# notebooks
+.ipynb_checkpoints/
+
+# datasets
+data/
+datasets/
+*.parquet
+*.h5
+
+# models
+checkpoints/
+*.pt
+*.pth
+
+# misc
+.DS_Store
