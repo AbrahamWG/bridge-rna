@@ -41,20 +41,18 @@ class PreprocessingConfig:
     species: str = "both"                    # "human", "mouse", "both"
     gene_set: str = "shared_orthologs"       # "shared_orthologs", "union_orthologs"
 
-    # --- Sample count per species ---
-    n_samples: int = 120_000
-
     # --- QC ---
     qc_min_nonzero: int = 14_000             # min non-zero genes per sample
     remove_single_cell: bool = True
 
     # --- Normalization ---
-    normalization: str = "log1p_tpm"         # "log1p_tpm", "raw_counts"
+    normalization: str = "log1p_tpm"         # "log1p_tpm", "tpm", "raw_counts"
     extraction_batch_size: int = 10_000
 
     # --- Paths ---
     archs4_dir: str = "data/archs4"
     orthologs_file: str = "data/ensembl/orthologs_one2one.txt"
+    protein_coding_file: str = "data/ensembl/protein_coding_ortholog_genes.txt"
     exon_lengths_human: str = "data/gencode/gencode_v49_gene_exon_lengths.csv"
     exon_lengths_mouse: str = "data/gencode/gencode_v49_mouse_gene_exon_lengths.csv"
     output_dir: str = "data/archs4/train_orthologs"
@@ -72,8 +70,12 @@ class GeneRegistry:
     based on the chosen gene_set mode.
     """
 
-    def __init__(self, orthologs_file: str):
+    def __init__(self, orthologs_file: str, protein_coding_file: str):
         self.ortho_df = pd.read_csv(orthologs_file, sep="\t")
+
+        # Load protein-coding gene whitelist (human symbols)
+        with open(protein_coding_file) as f:
+            self.protein_coding = set(line.strip() for line in f if line.strip())
 
         # Mouse→Human and Human→Mouse mappings
         self.mouse_to_human = dict(
@@ -83,14 +85,14 @@ class GeneRegistry:
             zip(self.ortho_df["Human gene name"], self.ortho_df["Gene name"])
         )
 
-        # All valid human ortholog gene names (no NaN)
+        # All valid human ortholog gene names that are protein-coding
         self.all_human_ortho = sorted(
             g for g in self.ortho_df["Human gene name"].unique()
-            if isinstance(g, str)
+            if isinstance(g, str) and g in self.protein_coding
         )
         self.all_mouse_ortho = sorted(
             g for g in self.ortho_df["Gene name"].unique()
-            if isinstance(g, str)
+            if isinstance(g, str) and self.mouse_to_human.get(g) in self.protein_coding
         )
 
     def get_canonical_genes(
@@ -129,7 +131,9 @@ class GeneRegistry:
 # EXPRESSION LOADER
 # ============================================================
 class ExpressionLoader:
-    """Loads and normalizes expression data from ARCHS4 H5 files."""
+    """Loads and normalizes expression data from ARCHS4 H5 files via h5py."""
+
+    SC_THRESHOLD = 0.5  # single-cell probability cutoff
 
     def __init__(self, config: PreprocessingConfig):
         self.config = config
@@ -150,141 +154,150 @@ class ExpressionLoader:
             self._exon_mouse = df.set_index("gene_symbol")["exon_length"]
         return self._exon_mouse
 
+    def _load_h5_meta(self, h5_path: str, species: str):
+        """Read H5 metadata: gene symbols, GEO accessions, SC probabilities."""
+        import h5py
+        print(f"    Opening {h5_path}...")
+        h = h5py.File(h5_path, "r")
+
+        n_genes, n_samples = h["data/expression"].shape
+        print(f"    H5 shape: {n_genes:,} genes × {n_samples:,} samples")
+
+        print(f"    Loading gene symbols...", end=" ", flush=True)
+        gene_symbols = np.array([g.decode() for g in h["meta/genes/symbol"][:]])
+        print(f"done ({len(gene_symbols):,})")
+
+        print(f"    Loading sample accessions...", end=" ", flush=True)
+        geo_accessions = np.array([s.decode() for s in h["meta/samples/geo_accession"][:]])
+        print(f"done ({len(geo_accessions):,})")
+
+        sc_prob = None
+        if self.config.remove_single_cell and "singlecellprobability" in h["meta/samples"]:
+            print(f"    Loading SC probabilities...", end=" ", flush=True)
+            sc_prob = h["meta/samples/singlecellprobability"][:]
+            n_bulk = int((sc_prob < self.SC_THRESHOLD).sum())
+            print(f"done ({n_bulk:,} bulk / {len(sc_prob) - n_bulk:,} SC)")
+
+        gene_lengths = (
+            self.exon_lengths_human if species == "human"
+            else self.exon_lengths_mouse
+        )
+        print(f"    Computing gene mask...", end=" ", flush=True)
+        valid_genes = set(gene_lengths.index)
+        gene_mask = np.array([g in valid_genes for g in gene_symbols], dtype=bool)
+        print(f"done — {gene_mask.sum():,} / {len(gene_symbols):,} genes with exon lengths")
+
+        return h, gene_symbols, geo_accessions, sc_prob, gene_mask, gene_lengths
+
     def extract_and_normalize(
         self,
         h5_path: str,
         species: str,
-        n_samples: int,
         canonical_genes: list[str],
-        global_seen: set,
-        seed_offset: int = 0,
-    ) -> tuple[pd.DataFrame, pd.DataFrame, set]:
+        tmp_dir: str,
+    ) -> tuple[list[Path], pd.DataFrame]:
         """
-        Extract random samples from ARCHS4, normalize, align to canonical genes.
+        Sequentially read all bulk samples from ARCHS4 H5, normalize, align.
+        Writes each batch to a temporary parquet file to avoid OOM.
 
         Returns:
-            (expression_df, metadata_df, updated_global_seen)
-            expression_df: genes × samples (canonical gene index, float32)
-            metadata_df: DataFrame with [geo_accession, species] columns
+            (batch_paths, metadata_df)
         """
-        import archs4py as a4
-
-        gene_lengths = (
-            self.exon_lengths_human if species == "human"
-            else self.exon_lengths_mouse
-        )
+        h, gene_symbols, geo_accessions, sc_prob, gene_mask, gene_lengths = \
+            self._load_h5_meta(h5_path, species)
 
         cfg = self.config
-        batches = []
-        seen_local = set()
+        expr_ds = h["data/expression"]  # (n_genes, n_samples)
+        n_total = expr_ds.shape[1]
+        batch_size = cfg.extraction_batch_size
+        gene_names = gene_symbols[gene_mask]
+
+        batch_paths = []
+        all_accessions = []
         total = 0
-        batch_num = 0
+        total_bulk = 0
+        t_species = time.time()
 
-        while total < n_samples:
-            batch_num += 1
-            to_extract = min(cfg.extraction_batch_size, n_samples - total)
+        n_batches = (n_total + batch_size - 1) // batch_size
+        print(f"    Starting extraction: {n_batches} batches of {batch_size:,}")
 
-            expr = a4.data.rand(
-                h5_path, to_extract,
-                remove_sc=cfg.remove_single_cell,
-                seed=cfg.seed + seed_offset + batch_num,
-            )
-            if expr.empty or expr.shape[1] == 0:
-                print(f"    No more samples available. Stopping.")
-                break
+        tmp = Path(tmp_dir)
+        tmp.mkdir(parents=True, exist_ok=True)
+
+        for start in range(0, n_total, batch_size):
+            end = min(start + batch_size, n_total)
+            batch_num = start // batch_size + 1
+
+            print(f"    Batch {batch_num}/{n_batches}: reading {end - start:,} samples from H5...",
+                  end=" ", flush=True)
+            raw = expr_ds[:, start:end]  # (n_genes, chunk_size)
+
+            # Filter to genes with exon lengths (in memory)
+            raw = raw[gene_mask]
+
+            # Filter single-cell samples
+            if sc_prob is not None:
+                bulk_mask = sc_prob[start:end] < self.SC_THRESHOLD
+                raw = raw[:, bulk_mask]
+                chunk_accessions = geo_accessions[start:end][bulk_mask]
+            else:
+                chunk_accessions = geo_accessions[start:end]
+
+            if raw.shape[1] == 0:
+                print("skipped (all SC)")
+                continue
+
+            total_bulk += raw.shape[1]
+
+            chunk_df = pd.DataFrame(raw, index=gene_names, columns=chunk_accessions)
 
             # Aggregate duplicate gene rows
-            expr = expr.groupby(level=0).sum()
-
-            # Keep only genes with exon lengths
-            expr = expr.loc[expr.index.intersection(gene_lengths.index)]
+            chunk_df = chunk_df.groupby(level=0).sum()
 
             # QC: min non-zero genes
-            nonzero = (expr > 0).sum(axis=0)
-            expr = expr[nonzero[nonzero >= cfg.qc_min_nonzero].index]
+            nonzero = (chunk_df > 0).sum(axis=0)
+            chunk_df = chunk_df[nonzero[nonzero >= cfg.qc_min_nonzero].index]
 
-            # Local dedup
-            new = [s for s in expr.columns if s not in seen_local]
-            expr = expr[new]
-
-            # Global dedup
-            new = [s for s in expr.columns if s not in global_seen]
-            expr = expr[new]
-
-            if expr.shape[1] == 0:
+            if chunk_df.shape[1] == 0:
+                print(f"{raw.shape[1]} bulk, 0 passed QC")
                 continue
 
             # Normalize
-            if cfg.normalization == "log1p_tpm":
-                lengths_kb = gene_lengths.loc[expr.index].fillna(1000) / 1000.0
-                rate = expr.div(lengths_kb, axis=0)
+            if cfg.normalization in ("log1p_tpm", "tpm"):
+                lengths_kb = gene_lengths.loc[chunk_df.index].fillna(1000) / 1000.0
+                rate = chunk_df.div(lengths_kb, axis=0)
                 tpm = rate.div(rate.sum(axis=0), axis=1) * 1e6
-                expr = np.log1p(tpm)
-            # elif cfg.normalization == "raw_counts": pass through
+                chunk_df = np.log1p(tpm) if cfg.normalization == "log1p_tpm" else tpm
 
             # Align to canonical gene list
-            expr = expr.reindex(canonical_genes, fill_value=0).astype("float32")
+            chunk_df = chunk_df.reindex(canonical_genes, fill_value=0).astype("float32")
 
-            batches.append(expr)
-            seen_local.update(expr.columns)
-            total += expr.shape[1]
+            # Write to disk instead of keeping in RAM
+            batch_path = tmp / f"{species}_batch_{batch_num:04d}.parquet"
+            chunk_df.to_parquet(batch_path, compression="zstd")
+            batch_paths.append(batch_path)
+            all_accessions.extend(chunk_df.columns.tolist())
+            total += chunk_df.shape[1]
 
-            print(f"    Batch {batch_num}: +{expr.shape[1]:,} samples "
-                  f"({total:,}/{n_samples:,})")
+            elapsed = time.time() - t_species
+            frac = end / n_total
+            eta = (elapsed / frac - elapsed) if frac > 0 else 0
+            print(f"+{chunk_df.shape[1]:,} QC pass ({total:,} kept / "
+                  f"{total_bulk:,} bulk) "
+                  f"[{elapsed:.0f}s, ~{eta:.0f}s left]")
 
-            del expr
+            del raw, chunk_df
             gc.collect()
 
-        if not batches:
-            return pd.DataFrame(), pd.DataFrame(), global_seen
-
-        combined = pd.concat(batches, axis=1)
-        # Safety: drop any remaining column duplicates
-        combined = combined.loc[:, ~combined.columns.duplicated(keep="first")]
+        h.close()
 
         metadata = pd.DataFrame({
-            "geo_accession": combined.columns,
+            "geo_accession": all_accessions,
             "species": species,
         })
-
-        global_seen.update(combined.columns)
-        return combined, metadata, global_seen
-
-    def find_zero_genes(
-        self,
-        h5_path: str,
-        species: str,
-        canonical_genes: list[str],
-        n_probe: int = 20_000,
-    ) -> set[str]:
-        """
-        Probe a sample of data to find genes with zero expression.
-        Returns set of canonical gene names that are all-zero.
-        """
-        import archs4py as a4
-
-        gene_lengths = (
-            self.exon_lengths_human if species == "human"
-            else self.exon_lengths_mouse
-        )
-
-        expr = a4.data.rand(
-            h5_path, n_probe,
-            remove_sc=True,
-            seed=self.config.seed + 999,
-        )
-        expr = expr.groupby(level=0).sum()
-        expr = expr.loc[expr.index.intersection(gene_lengths.index)]
-
-        # Normalize same as main pipeline
-        lengths_kb = gene_lengths.loc[expr.index].fillna(1000) / 1000.0
-        rate = expr.div(lengths_kb, axis=0)
-        tpm = rate.div(rate.sum(axis=0), axis=1) * 1e6
-        expr = np.log1p(tpm)
-
-        expr = expr.reindex(canonical_genes, fill_value=0)
-        zero_genes = set(expr.index[expr.sum(axis=1) == 0])
-        return zero_genes
+        print(f"    Species done in {time.time() - t_species:.0f}s — "
+              f"{total:,} samples in {len(batch_paths)} batch files")
+        return batch_paths, metadata
 
 
 # ============================================================
@@ -313,13 +326,17 @@ class RNADatasetBuilder:
         else:
             self.config = PreprocessingConfig(**kwargs)
 
-        self.registry = GeneRegistry(self.config.orthologs_file)
+        self.registry = GeneRegistry(
+            self.config.orthologs_file,
+            self.config.protein_coding_file,
+        )
         self.loader = ExpressionLoader(self.config)
 
         # Populated by process()
         self.canonical_genes: list[str] = []
         self.expr: Optional[pd.DataFrame] = None   # genes × samples
         self.meta: Optional[pd.DataFrame] = None
+        self.zero_genes: dict[str, set] = {}        # species → set of zero-expression genes
 
     def _species_list(self) -> list[str]:
         if self.config.species == "both":
@@ -341,64 +358,82 @@ class RNADatasetBuilder:
         print(f"Gene set: {cfg.gene_set} | Species: {cfg.species}")
         print("=" * 70)
 
-        if cfg.gene_set == "shared_orthologs":
-            # Need to find zero-expression genes in each species
-            all_ortho = self.registry.all_human_ortho
-            human_zero = set()
-            mouse_zero = set()
+        # Start with all protein-coding orthologs
+        all_ortho = self.registry.all_human_ortho
+        print(f"\nProtein-coding orthologs: {len(all_ortho):,}")
 
-            if "human" in species_list:
-                print("\nProbing human for zero-expression genes...")
-                human_zero = self.loader.find_zero_genes(
-                    self._h5_path("human"), "human", all_ortho
-                )
-                print(f"  {len(human_zero):,} genes with zero expression")
-
-            if "mouse" in species_list:
-                print("Probing mouse for zero-expression genes...")
-                mouse_zero = self.loader.find_zero_genes(
-                    self._h5_path("mouse"), "mouse", all_ortho
-                )
-                print(f"  {len(mouse_zero):,} genes with zero expression")
-
-            self.canonical_genes = self.registry.get_canonical_genes(
-                cfg.gene_set, human_zero, mouse_zero
-            )
-        else:
-            self.canonical_genes = self.registry.get_canonical_genes(cfg.gene_set)
-
-        print(f"\nCanonical genes: {len(self.canonical_genes):,}")
-
-        # --- Extract all samples ---
+        # --- Extract all samples using full gene list ---
         print(f"\n{'='*70}")
-        print(f"Extracting {cfg.n_samples:,} samples per species")
+        print(f"Extracting all bulk samples")
         print(f"{'='*70}")
 
         all_exprs = []
         all_metas = []
-        global_seen = set()
 
         for species in species_list:
             print(f"\n  [{species.upper()}]")
-            expr, meta, global_seen = self.loader.extract_and_normalize(
+            expr, meta = self.loader.extract_and_normalize(
                 self._h5_path(species),
                 species,
-                cfg.n_samples,
-                self.canonical_genes,
-                global_seen,
+                all_ortho,
             )
             if not expr.empty:
                 all_exprs.append(expr)
                 all_metas.append(meta)
 
-        if all_exprs:
-            self.expr = pd.concat(all_exprs, axis=1)
-            self.meta = pd.concat(all_metas, ignore_index=True)
-            print(f"\nTotal: {self.expr.shape[1]:,} samples × "
-                  f"{self.expr.shape[0]:,} genes")
+        if not all_exprs:
+            print("No samples extracted.")
+            return
+
+        self.expr = pd.concat(all_exprs, axis=1)
+        self.meta = pd.concat(all_metas, ignore_index=True)
+        print(f"\nTotal after extraction: {self.expr.shape[1]:,} samples × "
+              f"{self.expr.shape[0]:,} genes")
+
+        # --- Remove zero-expression genes from actual data ---
+        if cfg.gene_set == "shared_orthologs":
+            print(f"\nFinding zero-expression genes across all samples...")
+            for species in species_list:
+                sp_cols = self.meta.loc[self.meta["species"] == species, "geo_accession"]
+                sp_expr = self.expr[sp_cols]
+                zero = set(sp_expr.index[sp_expr.sum(axis=1) == 0])
+                self.zero_genes[species] = zero
+                print(f"  {species}: {len(zero):,} genes with zero expression")
+
+            all_zero = set()
+            for zg in self.zero_genes.values():
+                all_zero |= zg
+            keep = [g for g in self.expr.index if g not in all_zero]
+            self.expr = self.expr.loc[keep]
+            print(f"  Removed {len(all_zero):,} genes → {len(keep):,} remaining")
+
+        self.canonical_genes = list(self.expr.index)
+        print(f"\nFinal: {self.expr.shape[1]:,} samples × "
+              f"{self.expr.shape[0]:,} genes")
 
         elapsed = time.time() - t0
-        print(f"Processing complete ({elapsed / 60:.1f} min)")
+
+        # --- Summary ---
+        total_samples = self.expr.shape[1] if self.expr is not None else 0
+        total_genes = len(self.canonical_genes)
+        print(f"\n{'='*70}")
+        print(f"SUMMARY")
+        print(f"{'='*70}")
+        print(f"  Species:         {cfg.species}")
+        print(f"  Gene set:        {cfg.gene_set}")
+        print(f"  Protein-coding:  yes ({len(self.registry.protein_coding):,} whitelist)")
+        print(f"  Canonical genes: {total_genes:,}")
+        print(f"  Total samples:   {total_samples:,}")
+        for sp in species_list:
+            sp_count = (self.meta["species"] == sp).sum() if self.meta is not None else 0
+            print(f"    {sp:>8s}:      {sp_count:,}")
+        print(f"  Normalization:   {cfg.normalization}")
+        if self.zero_genes:
+            print(f"  Zero-expression genes removed:")
+            for sp, zg in self.zero_genes.items():
+                print(f"    {sp:>8s}:      {len(zg):,}")
+        print(f"  Time elapsed:    {elapsed / 60:.1f} min")
+        print(f"{'='*70}")
 
     def save_parquet(self, output_dir: Optional[str] = None):
         """
@@ -464,18 +499,15 @@ if __name__ == "__main__":
     parser.add_argument("--species", default="both", choices=["human", "mouse", "both"])
     parser.add_argument("--gene-set", default="shared_orthologs",
                         choices=["shared_orthologs", "union_orthologs"])
-    parser.add_argument("--n-samples", type=int, default=120_000,
-                        help="Samples per species")
     parser.add_argument("--output-dir", default="data/archs4/train_orthologs")
     parser.add_argument("--qc-min-nonzero", type=int, default=14_000)
     parser.add_argument("--normalization", default="log1p_tpm",
-                        choices=["log1p_tpm", "raw_counts"])
+                        choices=["log1p_tpm", "tpm", "raw_counts"])
     args = parser.parse_args()
 
     config = PreprocessingConfig(
         species=args.species,
         gene_set=args.gene_set,
-        n_samples=args.n_samples,
         output_dir=args.output_dir,
         qc_min_nonzero=args.qc_min_nonzero,
         normalization=args.normalization,
