@@ -47,6 +47,7 @@ class PreprocessingConfig:
 
     # --- Normalization ---
     normalization: str = "tpm"               # "log1p_tpm", "tpm", "raw_counts"
+    debug_tpm_denominator: bool = False       # print TPM denominator debug stats
     extraction_batch_size: int = 10_000
 
     # --- Subsetting ---
@@ -142,6 +143,7 @@ class ExpressionLoader:
         self.config = config
         self._exon_human = None
         self._exon_mouse = None
+        self._tpm_debug_printed_labels = set()
 
     @property
     def exon_lengths_human(self) -> pd.Series:
@@ -198,11 +200,12 @@ class ExpressionLoader:
         gene_lengths: pd.Series,
         canonical_genes: list[str],
         gene_name_map: Optional[dict] = None,
+        debug_label: Optional[str] = None,
     ) -> pd.DataFrame:
         """
-        Shared normalization: groupby → QC → TPM → remap → reindex.
-        Normalization uses original gene names so gene_lengths match,
-        then remaps (e.g. mouse→human) afterward.
+        Shared preprocessing: groupby → QC → remap → reindex.
+        Keeps expression in count space; TPM/log1p_tpm is applied once later,
+        after final canonical gene filtering is complete.
         Returns aligned DataFrame or empty DataFrame if nothing passes QC.
         """
         cfg = self.config
@@ -217,21 +220,16 @@ class ExpressionLoader:
         if chunk_df.shape[1] == 0:
             return chunk_df
 
-        # Normalize (using original species gene names that match gene_lengths)
-        if cfg.normalization in ("log1p_tpm", "tpm"):
-            lengths_kb = gene_lengths.reindex(chunk_df.index).fillna(1000) / 1000.0
-            rate = chunk_df.div(lengths_kb, axis=0)
-            tpm = rate.div(rate.sum(axis=0), axis=1) * 1e6
-            chunk_df = np.log1p(tpm) if cfg.normalization == "log1p_tpm" else tpm
-
-        # Remap gene names (e.g. mouse → human symbols) AFTER normalization
+        # Remap gene names first (e.g. mouse -> human symbols)
         if gene_name_map is not None:
             new_idx = [gene_name_map.get(g, g) for g in chunk_df.index]
             chunk_df.index = new_idx
             chunk_df = chunk_df.groupby(level=0).sum()
 
-        # Align to canonical gene list
-        chunk_df = chunk_df.reindex(canonical_genes, fill_value=0).astype("float32")
+        # Align to canonical ortholog gene list before normalization
+        chunk_df = chunk_df.reindex(canonical_genes, fill_value=0)
+
+        chunk_df = chunk_df.astype("float32")
         return chunk_df
 
     def _extract_subset(
@@ -265,12 +263,23 @@ class ExpressionLoader:
 
         # Filter to genes with exon lengths
         valid_genes = set(gene_lengths.index)
-        keep = [g for g in raw_df.index if g in valid_genes]
-        raw_df = raw_df.loc[keep]
-        print(f"    Filtered to {len(keep):,} genes with exon lengths")
+        # IMPORTANT: use boolean mask, NOT a label list.
+        # raw_df.index can have duplicate gene symbols (e.g. RPS18 ×6 isoforms).
+        # Building keep=[g for g in index if g in valid_genes] puts 'RPS18' in the
+        # list 6 times; raw_df.loc[keep] then returns 6×6=36 rows for that gene and
+        # groupby.sum() inflates the count 6×. A boolean mask avoids that entirely.
+        keep_mask = raw_df.index.isin(valid_genes)
+        raw_df = raw_df.loc[keep_mask]
+        print(f"    Filtered to {int(keep_mask.sum()):,} genes with exon lengths")
 
         # Normalize
-        chunk_df = self._normalize_df(raw_df, gene_lengths, canonical_genes, gene_name_map)
+        chunk_df = self._normalize_df(
+            raw_df,
+            gene_lengths,
+            canonical_genes,
+            gene_name_map,
+            debug_label=species,
+        )
         del raw_df
 
         if chunk_df.shape[1] == 0:
@@ -371,7 +380,13 @@ class ExpressionLoader:
             total_bulk += raw.shape[1]
 
             chunk_df = pd.DataFrame(raw, index=gene_names, columns=chunk_accessions)
-            chunk_df = self._normalize_df(chunk_df, gene_lengths, canonical_genes, gene_name_map)
+            chunk_df = self._normalize_df(
+                chunk_df,
+                gene_lengths,
+                canonical_genes,
+                gene_name_map,
+                debug_label=species,
+            )
 
             if chunk_df.shape[1] == 0:
                 print(f"{raw.shape[1]} bulk, 0 passed QC")
@@ -452,6 +467,71 @@ class RNADatasetBuilder:
         fname = "human_gene_v2.5.h5" if species == "human" else "mouse_gene_v2.5.h5"
         return os.path.join(self.config.archs4_dir, fname)
 
+    def _apply_final_normalization_once(self, species_batch_paths: dict[str, list[Path]]):
+        """
+        Apply final normalization once, after canonical gene filtering is finalized.
+
+        For tpm/log1p_tpm, this computes TPM from counts using exon lengths in the
+        final canonical gene universe. For raw_counts, no-op.
+        """
+        cfg = self.config
+        if cfg.normalization == "raw_counts":
+            return
+
+        # Build species-specific exon-length maps in canonical (human-symbol) space.
+        human_lengths = self.loader.exon_lengths_human
+        mouse_lengths_human_space = self.loader.exon_lengths_mouse.rename(
+            index=self.registry.mouse_to_human
+        ).groupby(level=0).first()
+
+        print("\nApplying final TPM normalization once on canonical gene list...")
+        for species, paths in species_batch_paths.items():
+            print(f"  [{species.upper()}] {len(paths)} batch files")
+            exon_lengths = human_lengths if species == "human" else mouse_lengths_human_space
+            lengths_bp = exon_lengths.reindex(self.canonical_genes)
+
+            missing_len_mask = lengths_bp.isna()
+            n_missing = int(missing_len_mask.sum())
+            if n_missing > 0:
+                print(
+                    f"    [{species}] Missing exon lengths for {n_missing:,} canonical genes; "
+                    f"these genes should already be filtered out"
+                )
+
+            keep_genes = lengths_bp.index[~missing_len_mask]
+            lengths_kb = (lengths_bp.loc[keep_genes] / 1000.0)
+
+            for i, bp in enumerate(paths, 1):
+                batch_df = pd.read_parquet(bp)
+                # Restrict to final canonical genes first; missing genes are zero counts.
+                batch_df = batch_df.reindex(self.canonical_genes, fill_value=0.0)
+                batch_use = batch_df.loc[keep_genes]
+                rate = batch_use.astype(float).div(lengths_kb, axis=0)
+
+                if cfg.debug_tpm_denominator and i == 1:
+                    denom_dbg = rate.sum(axis=0)
+                    print(
+                        f"    [TPM DEBUG][{species}] genes_used={rate.shape[0]:,}, "
+                        f"samples={rate.shape[1]:,}, "
+                        f"denom(min/mean/max)={denom_dbg.min():.6f}/"
+                        f"{denom_dbg.mean():.6f}/{denom_dbg.max():.6f}"
+                    )
+                    for sid, d in denom_dbg.head(3).items():
+                        print(f"    [TPM DEBUG][{species}] sample={sid} denom={d:.6f}")
+
+                denom = rate.sum(axis=0).replace(0, np.nan)
+                tpm = rate.div(denom, axis=1) * 1e6
+                batch_out = tpm.reindex(self.canonical_genes, fill_value=0.0)
+
+                if cfg.normalization == "log1p_tpm":
+                    batch_out = np.log1p(batch_out)
+
+                batch_out = batch_out.astype("float32")
+                batch_out.to_parquet(bp, compression="zstd")
+
+                if i % 20 == 0 or i == len(paths):
+                    print(f"    {i}/{len(paths)} batches normalized", flush=True)
+
     def process(self):
         """Run the full pipeline: extract → normalize → find zero genes."""
         import shutil
@@ -525,7 +605,8 @@ class RNADatasetBuilder:
                 gene_sum = None
                 for bp in species_batch_paths[species]:
                     batch_df = pd.read_parquet(bp)
-                    batch_sum = batch_df.sum(axis=1)
+                    # Genes missing from a batch are treated as zero-expression.
+                    batch_sum = batch_df.sum(axis=1).reindex(all_ortho, fill_value=0)
                     if gene_sum is None:
                         gene_sum = batch_sum
                     else:
@@ -540,10 +621,32 @@ class RNADatasetBuilder:
             all_zero = set()
             for zg in self.zero_genes.values():
                 all_zero |= zg
-            self.canonical_genes = [g for g in all_ortho if g not in all_zero]
+            # Require exon lengths in both species for final TPM normalization.
+            human_len_genes = set(self.loader.exon_lengths_human.index)
+            mouse_len_genes = set(
+                self.loader.exon_lengths_mouse.rename(index=self.registry.mouse_to_human)
+                .groupby(level=0).first()
+                .index
+            )
+            valid_len_genes = human_len_genes & mouse_len_genes
+
+            self.canonical_genes = [
+                g for g in all_ortho
+                if g not in all_zero and g in valid_len_genes
+            ]
             print(f"  Removed {len(all_zero):,} genes → {len(self.canonical_genes):,} remaining")
         else:
-            self.canonical_genes = list(all_ortho)
+            human_len_genes = set(self.loader.exon_lengths_human.index)
+            mouse_len_genes = set(
+                self.loader.exon_lengths_mouse.rename(index=self.registry.mouse_to_human)
+                .groupby(level=0).first()
+                .index
+            )
+            valid_len_genes = human_len_genes & mouse_len_genes
+            self.canonical_genes = [g for g in all_ortho if g in valid_len_genes]
+
+        # Apply TPM/log1p_tpm exactly once on the final canonical gene universe.
+        self._apply_final_normalization_once(species_batch_paths)
 
         print(f"\nFinal: {total_samples:,} samples × "
               f"{len(self.canonical_genes):,} genes")
@@ -608,7 +711,7 @@ class RNADatasetBuilder:
         for i, bp in enumerate(self.batch_paths):
             batch_df = pd.read_parquet(bp)
             # Filter to canonical genes (drop zero-expression genes)
-            batch_df = batch_df.loc[self.canonical_genes]
+            batch_df = batch_df.reindex(self.canonical_genes, fill_value=0)
             merged_parts.append(batch_df)
 
             # Merge in chunks of 10 to limit memory
@@ -649,7 +752,7 @@ class RNADatasetBuilder:
         parts = []
         for bp in self.batch_paths:
             batch_df = pd.read_parquet(bp)
-            batch_df = batch_df.loc[self.canonical_genes]
+            batch_df = batch_df.reindex(self.canonical_genes, fill_value=0)
             parts.append(batch_df)
         combined = pd.concat(parts, axis=1)
         X = combined.values.T.astype(np.float32)  # [samples, genes]
@@ -670,6 +773,8 @@ if __name__ == "__main__":
     parser.add_argument("--qc-min-nonzero", type=int, default=14_000)
     parser.add_argument("--normalization", default="tpm",
                         choices=["log1p_tpm", "tpm", "raw_counts"])
+    parser.add_argument("--debug-tpm-denominator", action="store_true",
+                        help="Print TPM denominator diagnostics (sum and gene count used).")
     parser.add_argument("--max-samples", type=int, default=None,
                         help="Max samples per species (default: all). "
                              "Useful for quick test runs.")
@@ -681,6 +786,7 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         qc_min_nonzero=args.qc_min_nonzero,
         normalization=args.normalization,
+        debug_tpm_denominator=args.debug_tpm_denominator,
         max_samples_per_species=args.max_samples,
     )
 
