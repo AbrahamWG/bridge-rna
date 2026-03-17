@@ -861,3 +861,181 @@ wandb.errors.errors.CommError: Sweep walt_/expression-performer/4de5eeaw not fou
 	weight_decay: 0.01
 2026-03-16 06:56:44 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
 2026-03-16 06:56:49 INFO Running runs: ['kglr0zf7']
+2026-03-16 21:08:12 INFO Running runs: []
+2026-03-16 21:08:13 INFO Agent received command: run
+2026-03-16 21:08:13 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 256
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-16 21:08:13 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-16 21:08:18 INFO Running runs: ['8yv6y6ic']
+2026-03-16 22:47:39 INFO Cleaning up finished run: 8yv6y6ic
+2026-03-16 22:47:40 INFO Agent received command: run
+2026-03-16 22:47:40 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 384
+	learning_rate: 0.0003
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-16 22:47:40 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-16 22:47:45 INFO Running runs: ['lakb5q0j']
+2026-03-16 23:32:15 ERROR Error executing GraphQL.
+Traceback (most recent call last):
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/sdk/internal/internal_api.py", line 394, in execute
+    return self.client.execute(*args, **kwargs)  # type: ignore
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/vendor/gql-0.2.0/wandb_gql/client.py", line 52, in execute
+    result = self._get_result(document, *args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/vendor/gql-0.2.0/wandb_gql/client.py", line 60, in _get_result
+    return self.transport.execute(document, *args, **kwargs)
+  File "/home/walt/.local/lib/python3.10/site-packages/wandb/sdk/lib/gql_request.py", line 71, in execute
+    request.raise_for_status()
+  File "/home/walt/.local/lib/python3.10/site-packages/requests/models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 500 Server Error: Internal Server Error for url: https://api.wandb.ai/graphql
+2026-03-17 00:21:16 INFO Cleaning up finished run: lakb5q0j
+2026-03-17 00:21:18 INFO Agent received command: run
+2026-03-17 00:21:18 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 384
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 00:21:18 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 00:21:23 INFO Running runs: ['yi5z5y1o']
+2026-03-17 01:53:38 INFO Cleaning up finished run: yi5z5y1o
+2026-03-17 01:53:39 INFO Agent received command: run
+2026-03-17 01:53:39 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 384
+	learning_rate: 0.00015
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 01:53:39 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 01:53:44 INFO Running runs: ['ilzyapd4']
+2026-03-17 03:20:38 INFO Cleaning up finished run: ilzyapd4
+2026-03-17 03:20:39 INFO Agent received command: run
+2026-03-17 03:20:39 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 256
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 03:20:39 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 03:20:44 INFO Running runs: ['6yxlqj8r']
+2026-03-17 04:52:11 INFO Cleaning up finished run: 6yxlqj8r
+2026-03-17 04:52:12 INFO Agent received command: run
+2026-03-17 04:52:12 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 384
+	learning_rate: 0.00015
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 04:52:12 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 04:52:17 INFO Running runs: ['e8k6te9a']
+2026-03-17 06:22:53 INFO Cleaning up finished run: e8k6te9a
+2026-03-17 06:22:55 INFO Agent received command: run
+2026-03-17 06:22:55 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 384
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 06:22:55 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 06:23:00 INFO Running runs: ['lz4h3j9x']
+2026-03-17 07:54:47 INFO Cleaning up finished run: lz4h3j9x
+2026-03-17 07:54:49 INFO Agent received command: run
+2026-03-17 07:54:49 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 384
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 07:54:49 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 07:54:54 INFO Running runs: ['am6yulhl']
+2026-03-17 09:39:11 INFO Cleaning up finished run: am6yulhl
+2026-03-17 09:39:13 INFO Agent received command: run
+2026-03-17 09:39:13 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 512
+	learning_rate: 0.00015
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 09:39:13 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 09:39:18 INFO Running runs: ['9ij5wsfn']
+2026-03-17 11:36:57 INFO Cleaning up finished run: 9ij5wsfn
+2026-03-17 11:36:59 INFO Agent received command: run
+2026-03-17 11:36:59 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 512
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 11:36:59 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 11:37:04 INFO Running runs: ['1e9uzdsd']
+2026-03-17 13:36:27 INFO Cleaning up finished run: 1e9uzdsd
+2026-03-17 13:36:28 INFO Agent received command: run
+2026-03-17 13:36:28 INFO Agent starting run with config:
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 512
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 13:36:28 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 13:36:33 INFO Running runs: ['nw74wosj']

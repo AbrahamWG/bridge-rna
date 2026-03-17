@@ -78,7 +78,7 @@ CONFIG = {
     'mask_token': -10,
     'learning_rate': 1e-4,
     'weight_decay': 1e-5,
-    'batch_size': 16,
+    'batch_size': 4,
     'epochs': 5,
     'early_stopping': True,
     'patience': 5,
@@ -456,6 +456,8 @@ def main():
         for key in CONFIG:
             if key in wandb.config:
                 CONFIG[key] = wandb.config[key]
+        # Always derive ffn_dim from hidden_dim (4x multiplier)
+        CONFIG['ffn_dim'] = CONFIG['hidden_dim'] * 4
 
     # Broadcast CONFIG from rank 0 so all ranks use the same hyperparams
     config_list = [CONFIG if is_main else None]

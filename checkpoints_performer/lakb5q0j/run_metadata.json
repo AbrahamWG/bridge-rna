@@ -1,0 +1,43 @@
+{
+  "run_id": "lakb5q0j",
+  "timestamp": "20260316_224804",
+  "run_tag": "norm-log1p_tpm_lr-3p00em04_wd-0p00e00_mask-0p150000_ree-100p000000",
+  "normalization": "log1p_tpm",
+  "sweep_parameters": {
+    "learning_rate": 0.0003,
+    "weight_decay": 0,
+    "mask_ratio": 0.15,
+    "ree_base": 100,
+    "early_stopping": false
+  },
+  "architecture": {
+    "hidden_dim": 384,
+    "ffn_dim": 1536,
+    "num_heads": 8,
+    "num_layers": 2
+  },
+  "dataset": {
+    "train_samples": 10000,
+    "val_samples": 1494,
+    "num_genes": 15165,
+    "train_used_counts": {
+      "human": 5000,
+      "mouse": 5000
+    },
+    "val_used_counts": {
+      "human": 747,
+      "mouse": 747
+    },
+    "train_raw_counts": {
+      "human": 6713,
+      "mouse": 5978
+    },
+    "val_raw_counts": {
+      "human": 839,
+      "mouse": 747
+    },
+    "balanced_sampling": true,
+    "train_subset": 10000,
+    "val_subset": 2000
+  }
+}
