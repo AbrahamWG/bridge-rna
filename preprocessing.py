@@ -232,6 +232,60 @@ class ExpressionLoader:
         chunk_df = chunk_df.astype("float32")
         return chunk_df
 
+    def _normalize_df_per_sample(
+        self,
+        chunk_df: pd.DataFrame,
+        gene_lengths: pd.Series,
+        canonical_genes: list[str],
+        gene_name_map: Optional[dict] = None,
+        debug_label: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Process samples individually to gracefully skip sketchy samples.
+        Only drops a sample if its normalization/QC fails, not the whole batch.
+        """
+        cfg = self.config
+        good_samples = []
+        bad_samples = []
+        
+        for sample_id in chunk_df.columns:
+            try:
+                # Single-sample DataFrame
+                sample_df = chunk_df[[sample_id]].copy()
+                
+                # Aggregate duplicate gene rows
+                sample_df = sample_df.groupby(level=0).sum()
+                
+                # QC: min non-zero genes
+                nonzero = (sample_df > 0).sum(axis=0)[sample_id]
+                if nonzero < cfg.qc_min_nonzero:
+                    bad_samples.append((sample_id, f"low_genes({nonzero})"))
+                    continue
+                
+                # Remap gene names (e.g. mouse -> human symbols)
+                if gene_name_map is not None:
+                    new_idx = [gene_name_map.get(g, g) for g in sample_df.index]
+                    sample_df.index = new_idx
+                    sample_df = sample_df.groupby(level=0).sum()
+                
+                # Align to canonical ortholog gene list
+                sample_df = sample_df.reindex(canonical_genes, fill_value=0)
+                sample_df = sample_df.astype("float32")
+                
+                good_samples.append(sample_df)
+            except Exception as e:
+                bad_samples.append((sample_id, str(e)))
+        
+        if bad_samples and debug_label:
+            print(f"[{debug_label}] Skipped {len(bad_samples)} sketchy samples: "
+                  f"{', '.join(r[0] for r in bad_samples[:3])}"
+                  f"{'...' if len(bad_samples) > 3 else ''}")
+        
+        if not good_samples:
+            return pd.DataFrame()
+        
+        return pd.concat(good_samples, axis=1)
+
     def _extract_subset(
         self,
         h5_path: str,
@@ -380,7 +434,9 @@ class ExpressionLoader:
             total_bulk += raw.shape[1]
 
             chunk_df = pd.DataFrame(raw, index=gene_names, columns=chunk_accessions)
-            chunk_df = self._normalize_df(
+            
+            # Process samples individually so one bad sample doesn't sink the whole batch
+            chunk_df = self._normalize_df_per_sample(
                 chunk_df,
                 gene_lengths,
                 canonical_genes,

@@ -458,6 +458,7 @@ def main():
                 CONFIG[key] = wandb.config[key]
         # Always derive ffn_dim from hidden_dim (4x multiplier)
         CONFIG['ffn_dim'] = CONFIG['hidden_dim'] * 4
+        wandb.config.update(CONFIG, allow_val_change=True)
 
     # Broadcast CONFIG from rank 0 so all ranks use the same hyperparams
     config_list = [CONFIG if is_main else None]

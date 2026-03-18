@@ -1039,3 +1039,54 @@ requests.exceptions.HTTPError: 500 Server Error: Internal Server Error for url: 
 	weight_decay: 0
 2026-03-17 13:36:28 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
 2026-03-17 13:36:33 INFO Running runs: ['nw74wosj']
+2026-03-17 15:29:58 INFO Running runs: []
+2026-03-17 15:29:59 INFO Agent received command: run
+2026-03-17 15:29:59 INFO Agent starting run with config:
+	batch_size: 4
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 512
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 15:29:59 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 15:30:04 INFO Running runs: ['9sou7cd8']
+2026-03-17 17:30:20 INFO Cleaning up finished run: 9sou7cd8
+2026-03-17 17:30:21 INFO Agent received command: run
+2026-03-17 17:30:21 INFO Agent starting run with config:
+	batch_size: 8
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 512
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 17:30:21 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 17:30:26 INFO Running runs: ['ud1ret7w']
+2026-03-17 18:55:54 INFO Cleaning up finished run: ud1ret7w
+2026-03-17 18:55:55 INFO Agent received command: run
+2026-03-17 18:55:55 INFO Agent starting run with config:
+	batch_size: 16
+	early_stopping: False
+	epochs: 5
+	hidden_dim: 512
+	learning_rate: 0.0002
+	mask_ratio: 0.15
+	normalization: log1p_tpm
+	num_heads: 8
+	num_layers: 2
+	ree_base: 100
+	weight_decay: 0
+2026-03-17 18:55:55 INFO About to run command: /usr/bin/env /home/walt/Attention/sweep_train.sh
+2026-03-17 18:56:00 INFO Running runs: ['nshqyw42']
+2026-03-17 20:32:53 INFO Cleaning up finished run: nshqyw42
+2026-03-17 20:32:54 INFO Agent received command: exit
+2026-03-17 20:32:54 INFO Received exit command. Killing runs and quitting.
