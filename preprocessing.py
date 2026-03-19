@@ -31,6 +31,126 @@ import pandas as pd
 
 
 # ============================================================
+# H5 VALIDATION & DIAGNOSTICS
+# ============================================================
+def validate_h5_file(h5_path: str, verbose: bool = True) -> bool:
+    """
+    Validate HDF5 file structure and datasets before processing.
+    Tests file integrity, dataset existence, and readability.
+    
+    Returns:
+        True if file is valid, False otherwise.
+    """
+    import h5py
+    
+    try:
+        with h5py.File(h5_path, 'r') as f:
+            errors = []
+            
+            # 1. Validate expression dataset exists and has correct shape
+            if 'data/expression' not in f:
+                errors.append("Missing 'data/expression' dataset")
+            else:
+                expr = f['data/expression']
+                if verbose:
+                    print(f"    Dataset shape: {expr.shape}")
+                    print(f"    Dtype: {expr.dtype}")
+                    print(f"    Chunks: {expr.chunks}")
+                
+            # 2. Test reading a small chunk (corner of matrix)
+            try:
+                test_read = f['data/expression'][:100, :100]
+                if verbose:
+                    print(f"    ✓ Test read successful (100×100 subset)")
+            except Exception as e:
+                errors.append(f"Failed to read test chunk: {e}")
+            
+            if errors:
+                print(f"  ⚠️ Issues found:")
+                for err in errors:
+                    print(f"    - {err}")
+                return False
+            else:
+                if verbose:
+                    print(f"  ✓ File structure valid")
+                return True
+                
+    except OSError as e:
+        print(f"  ❌ H5 file corrupted or unreadable: {e}")
+        return False
+
+
+def diagnose_h5_batch_failure(
+    h5_path: str,
+    batch_start: int,
+    batch_end: int,
+    gene_mask: np.ndarray = None,
+    verbose: bool = True,
+) -> tuple[list[int], list[tuple[int, str]]]:
+    """
+    Pinpoint exactly which samples fail to read in a batch.
+    
+    Args:
+        h5_path: Path to HDF5 file
+        batch_start: Starting sample index
+        batch_end: Ending sample index (exclusive)
+        gene_mask: Optional gene mask to apply (like in extract_and_normalize)
+        verbose: Print diagnostics
+    
+    Returns:
+        (successful_sample_indices, [(failed_idx, error_msg), ...])
+    """
+    import h5py
+    
+    successful = []
+    failed = []
+    
+    try:
+        with h5py.File(h5_path, 'r') as f:
+            expr = f['data/expression']
+            n_samples = expr.shape[1]
+            
+            # Clamp to actual file size
+            batch_end = min(batch_end, n_samples)
+            batch_size = batch_end - batch_start
+            
+            if verbose:
+                print(f"    Diagnosing {batch_size:,} samples in range [{batch_start}:{batch_end}]...")
+            
+            for sample_idx in range(batch_start, batch_end):
+                try:
+                    # Try to read just that sample
+                    sample_data = expr[:, sample_idx]
+                    
+                    # If gene mask provided, apply it
+                    if gene_mask is not None:
+                        sample_data = sample_data[gene_mask]
+                    
+                    # Check if sample has any data
+                    if len(sample_data) > 0:
+                        successful.append(sample_idx)
+                    else:
+                        failed.append((sample_idx, "empty_data"))
+                        
+                except Exception as e:
+                    failed.append((sample_idx, str(e)[:60]))
+            
+            if verbose:
+                print(f"    ✓ {len(successful):,} samples readable")
+                if failed:
+                    print(f"    ✗ {len(failed):,} samples FAILED")
+                    print(f"      Failed indices: {[s[0] for s in failed[:10]]}")
+                    if len(failed) > 10:
+                        print(f"      ... and {len(failed) - 10} more")
+                    print(f"      Error type: {failed[0][1]}")
+    
+    except OSError as e:
+        print(f"    ❌ Cannot open H5 file for diagnosis: {e}")
+    
+    return successful, failed
+
+
+# ============================================================
 # CONFIGURATION
 # ============================================================
 @dataclass
@@ -383,6 +503,11 @@ class ExpressionLoader:
                 h5_path, species, canonical_genes, tmp_dir, gene_name_map
             )
 
+        # === Validate H5 file structure before processing ===
+        print(f"    Validating H5 file structure...")
+        if not validate_h5_file(h5_path, verbose=True):
+            print(f"    ⚠️  H5 file validation failed, proceeding with caution...")
+
         h, gene_symbols, geo_accessions, sc_prob, gene_mask, gene_lengths = \
             self._load_h5_meta(h5_path, species)
 
@@ -410,22 +535,66 @@ class ExpressionLoader:
 
             print(f"    Batch {batch_num}/{n_batches}: reading {b_end - b_start:,} samples from H5...",
                   end=" ", flush=True)
+            
+            # Try to read entire batch
+            batch_read_failed = False
+            successful_idxs = None
+            
             try:
                 raw = expr_ds[:, b_start:b_end]  # (n_genes, chunk_size)
+                chunk_accessions_base = geo_accessions[b_start:b_end]
             except OSError as e:
-                print(f"SKIPPED (H5 read error: {e})")
-                continue
+                print(f"\n    ❌ H5 read error: {e}")
+                print(f"    Running diagnosis to find recoverable samples...")
+                batch_read_failed = True
+                
+                # Diagnose which samples fail
+                successful_idxs, failed_idxs = diagnose_h5_batch_failure(
+                    h5_path,
+                    b_start,
+                    b_end,
+                    gene_mask=gene_mask,
+                    verbose=True,
+                )
+                
+                # If some samples are recoverable, read them individually
+                if successful_idxs:
+                    print(f"    Recovering {len(successful_idxs):,} readable samples individually...")
+                    raw_parts = []
+                    for sample_idx in successful_idxs:
+                        try:
+                            sample_data = expr_ds[:, sample_idx]
+                            raw_parts.append(sample_data.reshape(-1, 1))
+                        except Exception as e2:
+                            print(f"      Sample {sample_idx} failed on retry: {e2}")
+                            pass
+                    
+                    if raw_parts:
+                        raw = np.hstack(raw_parts)  # (n_genes, n_recovered)
+                        # Update accessions to match recovered samples
+                        chunk_accessions_base = geo_accessions[b_start:b_end]
+                        chunk_accessions_base = chunk_accessions_base[[s - b_start for s in successful_idxs]]
+                    else:
+                        print(f"    No samples recoverable in batch {batch_num}, skipping...")
+                        continue
+                else:
+                    print(f"    No recoverable samples in batch {batch_num}, skipping entirely...")
+                    continue
 
             # Filter to genes with exon lengths (in memory)
             raw = raw[gene_mask]
 
             # Filter single-cell samples
             if sc_prob is not None:
-                bulk_mask = sc_prob[b_start:b_end] < self.SC_THRESHOLD
+                if batch_read_failed and successful_idxs:
+                    # Use pre-filtered accessions from recovery
+                    bulk_mask = sc_prob[successful_idxs] < self.SC_THRESHOLD
+                else:
+                    bulk_mask = sc_prob[b_start:b_end] < self.SC_THRESHOLD
                 raw = raw[:, bulk_mask]
-                chunk_accessions = geo_accessions[b_start:b_end][bulk_mask]
+                chunk_accessions = chunk_accessions_base[bulk_mask]
             else:
-                chunk_accessions = geo_accessions[b_start:b_end]
+                chunk_accessions = chunk_accessions_base
 
             if raw.shape[1] == 0:
                 print("skipped (all SC)")
@@ -629,7 +798,7 @@ class RNADatasetBuilder:
         print(f"\nProtein-coding orthologs: {len(all_ortho):,}")
 
         # --- Extract all samples using full gene list (stream to disk) ---
-        tmp_dir = os.path.join(cfg.output_dir, "_tmp_batches")
+        tmp_dir = os.path.join(cfg.output_dir, "batch_files")
         print(f"\n{'='*70}")
         print(f"Extracting all bulk samples (streaming to {tmp_dir})")
         print(f"{'='*70}")
@@ -764,48 +933,35 @@ class RNADatasetBuilder:
         with open(out / "genes.json", "w") as f:
             json.dump(self.canonical_genes, f)
 
-        samples = self.meta["geo_accession"].tolist()
+        samples_with_meta = [
+            {"id": row["geo_accession"], "species": row["species"]}
+            for _, row in self.meta.iterrows()
+        ]
         with open(out / "samples.json", "w") as f:
-            json.dump(samples, f)
+            json.dump(samples_with_meta, f)
 
+        # Create batch manifest: which samples are in which batch files
+        batch_manifest = {}
+        for i, batch_path in enumerate(self.batch_paths, 1):
+            df_batch = pd.read_parquet(batch_path)
+            batch_name = f"batch_{i:04d}.parquet"
+            sample_ids = df_batch.columns.tolist()
+            batch_manifest[batch_name] = sample_ids
+        
+        with open(out / "batch_manifest.json", "w") as f:
+            json.dump(batch_manifest, f)
+        
         print(f"Saved canonical_genes.csv, genes.json ({len(self.canonical_genes):,} genes), "
-              f"samples.json ({len(samples):,} samples)")
-
-        # Merge batch parquets → one final parquet (streaming, low memory)
-        print(f"Merging {len(self.batch_paths)} batch files into expression.parquet...",
-              flush=True)
-        merged_parts = []
-        for i, bp in enumerate(self.batch_paths):
-            batch_df = pd.read_parquet(bp)
-            # Filter to canonical genes (drop zero-expression genes)
-            batch_df = batch_df.reindex(self.canonical_genes, fill_value=0)
-            merged_parts.append(batch_df)
-
-            # Merge in chunks of 10 to limit memory
-            if len(merged_parts) >= 10:
-                merged_parts = [pd.concat(merged_parts, axis=1)]
-                gc.collect()
-
-            if (i + 1) % 20 == 0 or (i + 1) == len(self.batch_paths):
-                print(f"  {i + 1}/{len(self.batch_paths)} batch files read", flush=True)
-
-        combined = pd.concat(merged_parts, axis=1)
-        expr_path = out / "expression.parquet"
-        combined.to_parquet(expr_path, compression="zstd")
-        print(f"Saved {expr_path}: {combined.shape}")
-        del combined, merged_parts
-        gc.collect()
+              f"samples.json ({len(samples_with_meta):,} samples), batch_manifest.json")
 
         # Metadata
         meta_path = out / "metadata.csv"
         self.meta.to_csv(meta_path, index=False)
         print(f"Saved {meta_path}: {len(self.meta):,} rows")
 
-        # Clean up temp batch files
-        tmp_dir = Path(self.config.output_dir) / "_tmp_batches"
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
-            print(f"Cleaned up {tmp_dir}")
+        # Keep batch_files directory (no cleanup)
+        batch_dir = Path(self.config.output_dir) / "batch_files"
+        print(f"Kept batch files in {batch_dir}: {len(self.batch_paths)} files")
 
         print("Done.")
 

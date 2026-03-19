@@ -250,83 +250,120 @@ class ExpressionMLMDataset(Dataset):
 # ============================================================
 # DATA LOADING
 # ============================================================
-def load_parquet_data(path):
-    """Load parquet file and transpose to [samples, genes]."""
-    df = pd.read_parquet(path)
-    data = df.values.T.astype(np.float32)  # [samples, genes]
-    return data
-
-
-def _split_bounds(n: int) -> tuple[int, int]:
-    """Return split boundaries for 80/10/10 train/val/test."""
-    n_train = int(n * 0.8)
-    n_val = int(n * 0.1)
-    return n_train, n_train + n_val
-
-
-def _load_unified_split_arrays(data_dir, split, species_list, seed=42, verbose=True):
-    """Load split arrays from unified expression.parquet + metadata.csv layout.
-
-    Expected unified files:
-      - data_dir / expression.parquet (genes x samples)
-      - data_dir / metadata.csv       (geo_accession, species)
+def load_from_batch_files(batch_dir, train_frac=0.8, subset=None, balanced_sampling=True, seed=42, verbose=True):
     """
-    expr_path = data_dir / 'expression.parquet'
-    meta_path = data_dir / 'metadata.csv'
-    if not expr_path.exists() or not meta_path.exists():
-        raise FileNotFoundError(
-            f"Unified data files not found under {data_dir} "
-            f"(expected expression.parquet and metadata.csv)"
-        )
-
+    Load expression data from batch parquet files.
+    Splits at the batch-file level (not individual samples) for efficiency.
+    
+    Args:
+        batch_dir: Path to directory containing batch*.parquet files
+        train_frac: Fraction of batch files for training (rest goes to val)
+        subset: Max total samples to load (None = all available, but respects balanced_sampling)
+        balanced_sampling: If True, balance human/mouse species (50/50)
+        seed: Random seed for reproducible splitting
+        verbose: Print progress
+    
+    Returns:
+        (X_train, X_val): Both [samples, genes] arrays
+    """
+    batch_dir = Path(batch_dir)
+    batch_files = sorted(batch_dir.glob("*.parquet"))
+    
+    if not batch_files:
+        raise FileNotFoundError(f"No parquet files found in {batch_dir}")
+    
+    # Load metadata to determine species per batch
+    metadata_file = batch_dir.parent / "samples.json"
+    sample_to_species = {}
+    if metadata_file.exists():
+        import json
+        with open(metadata_file) as f:
+            samples_meta = json.load(f)
+        # Build species mapping: sample_id → species
+        sample_to_species = {s["id"]: s["species"] for s in samples_meta if "species" in s}
+    
+    # Deterministic shuffle and split
+    rng = np.random.default_rng(seed)
+    indices = np.arange(len(batch_files))
+    rng.shuffle(indices)
+    
+    split_idx = int(len(batch_files) * train_frac)
+    train_indices = indices[:split_idx]
+    val_indices = indices[split_idx:]
+    
     if verbose:
-        print(f"  ↳ Using unified dataset fallback from {expr_path}")
-
-    # [samples, genes] with sample IDs as index
-    expr_df = pd.read_parquet(expr_path).T
-    meta_df = pd.read_csv(meta_path)
-    if 'geo_accession' not in meta_df.columns or 'species' not in meta_df.columns:
-        raise ValueError("metadata.csv must contain columns: geo_accession, species")
-
-    arrays = {}
-    raw_counts = {}
-
-    for sp in species_list:
-        sp_ids = meta_df.loc[meta_df['species'] == sp, 'geo_accession'].tolist()
-        sp_ids = [sid for sid in sp_ids if sid in expr_df.index]
-        if not sp_ids:
+        print(f"[DATA] Batch files: {len(batch_files)} total")
+        print(f"       Train: {len(train_indices)} files, Val: {len(val_indices)} files")
+    
+    # Load and concatenate batch files
+    def load_batches(batch_indices, max_samples=None):
+        parts_by_species = {}
+        total_loaded = 0
+        
+        # First pass: load all data and count by species
+        for idx in batch_indices:
+            df = pd.read_parquet(batch_files[idx])
+            data = df.values.T.astype(np.float32)  # [samples, genes]
+            
+            if sample_to_species:
+                # Separate by species
+                sample_ids = df.columns.tolist()
+                for i, s in enumerate(sample_ids):
+                    species = sample_to_species.get(s, "unknown")
+                    if species not in parts_by_species:
+                        parts_by_species[species] = []
+                    parts_by_species[species].append(data[i:i+1])
+            else:
+                # No species info, treat as single group
+                if "all" not in parts_by_species:
+                    parts_by_species["all"] = []
+                parts_by_species["all"].append(data)
+            
+            total_loaded += data.shape[0]
+        
+        # Second pass: apply subsampling/balancing
+        result_parts = []
+        
+        if balanced_sampling and len(parts_by_species) > 1:
+            # Determine per-species limit
+            if max_samples:
+                per_species = max_samples // len(parts_by_species)
+            else:
+                # Use min species count (balance naturally across all data)
+                species_counts = [np.vstack(parts).shape[0] for parts in parts_by_species.values()]
+                per_species = min(species_counts)
+            
             if verbose:
-                print(f"  ✗ {sp} {split}: no samples in unified metadata")
-            continue
-
-        rng = np.random.default_rng(seed + (abs(hash(sp)) % 10000))
-        perm = rng.permutation(len(sp_ids))
-        sp_ids = [sp_ids[i] for i in perm]
-
-        n_train, n_val_end = _split_bounds(len(sp_ids))
-        if split == 'train':
-            ids = sp_ids[:n_train]
-        elif split == 'val':
-            ids = sp_ids[n_train:n_val_end]
-        elif split == 'test':
-            ids = sp_ids[n_val_end:]
+                species_counts = {sp: np.vstack(parts).shape[0] for sp, parts in parts_by_species.items()}
+                print(f"       Species counts (before balancing): {species_counts}")
+                print(f"       Balanced to {per_species} per species")
+            
+            for species, parts in parts_by_species.items():
+                concatenated = np.vstack(parts)
+                if concatenated.shape[0] > per_species:
+                    indices = rng.choice(concatenated.shape[0], per_species, replace=False)
+                    result_parts.append(concatenated[indices])
+                else:
+                    result_parts.append(concatenated)
+        
         else:
-            raise ValueError(f"Unknown split: {split!r}")
-
-        arr = expr_df.loc[ids].values.astype(np.float32)
-        arrays[sp] = arr
-        raw_counts[sp] = int(arr.shape[0])
-        if verbose:
-            print(f"  ✓ {sp} {split} (unified): {arr.shape}")
-
-    return arrays, raw_counts
-
-
-def _sample_rows(arr: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
-    if n >= len(arr):
-        return arr
-    idx = rng.choice(len(arr), size=n, replace=False)
-    return arr[idx]
+            # No balancing, just subsample if needed
+            all_data = np.vstack([np.vstack(parts) for parts in parts_by_species.values()])
+            if max_samples and all_data.shape[0] > max_samples:
+                indices = rng.choice(all_data.shape[0], max_samples, replace=False)
+                result_parts.append(all_data[indices])
+            else:
+                result_parts.append(all_data)
+        
+        return np.vstack(result_parts) if result_parts else np.array([])
+    
+    X_train = load_batches(train_indices, max_samples=subset)
+    X_val = load_batches(val_indices, max_samples=subset)
+    
+    if verbose:
+        print(f"       Final: train {X_train.shape}, val {X_val.shape}")
+    
+    return X_train, X_val
 
 
 def apply_input_normalization(x: np.ndarray, normalization: str) -> np.ndarray:
@@ -352,75 +389,6 @@ def build_run_tag(cfg: dict) -> str:
         f"_mask-{format_float_for_tag(cfg['mask_ratio'])}"
         f"_ree-{format_float_for_tag(cfg['ree_base'])}"
     )
-
-
-def load_split(
-    data_dir,
-    split,
-    species_list,
-    subset=None,
-    balanced_sampling=True,
-    seed=42,
-    verbose=True,
-):
-    """Load split data and optionally subset with 50/50 species balancing.
-
-    Returns:
-        data: [samples, genes]
-        used_counts: samples used per species after subsetting
-        raw_counts: samples available per species before subsetting
-    """
-    arrays = {}
-    raw_counts = {}
-    for species in species_list:
-        path = data_dir / split / f'expression_{split}_{species}.parquet'
-        if path.exists():
-            arr = load_parquet_data(path)
-            if verbose:
-                print(f"  ✓ {species} {split}: {arr.shape}")
-            arrays[species] = arr
-            raw_counts[species] = int(arr.shape[0])
-        elif verbose:
-            print(f"  ✗ {species} {split}: not found")
-
-    # Fallback: unified layout (expression.parquet + metadata.csv)
-    if not arrays:
-        arrays, raw_counts = _load_unified_split_arrays(
-            data_dir,
-            split,
-            species_list,
-            seed=seed,
-            verbose=verbose,
-        )
-
-    if not arrays:
-        raise FileNotFoundError(f"No data found for split={split}")
-
-    rng = np.random.default_rng(seed)
-
-    if subset is not None:
-        if balanced_sampling:
-            # 50/50 species sampling for sweeps to avoid species dominance.
-            per_species_target = max(1, subset // max(1, len(arrays)))
-            max_balanced = min(arr.shape[0] for arr in arrays.values())
-            per_species = min(per_species_target, max_balanced)
-            arrays = {
-                sp: _sample_rows(arr, per_species, rng)
-                for sp, arr in arrays.items()
-            }
-            if verbose:
-                print(
-                    f"  ↳ Balanced subset enabled: {per_species} per species "
-                    f"({per_species * len(arrays)} total)"
-                )
-        else:
-            concat_all = np.vstack(list(arrays.values()))
-            concat_all = _sample_rows(concat_all, subset, rng)
-            used_counts = {sp: None for sp in arrays.keys()}
-            return concat_all, used_counts, raw_counts
-
-    used_counts = {sp: int(arr.shape[0]) for sp, arr in arrays.items()}
-    return np.vstack(list(arrays.values())), used_counts, raw_counts
 
 
 # ============================================================
@@ -469,43 +437,32 @@ def main():
     # LOAD DATA
     # ─────────────────────────────────────────────────────────
     data_dir = Path(CONFIG['data_dir'])
-    species = ['human', 'mouse']
-
+    
     if is_main:
-        print("\n[DATA] Loading training data...")
+        print("\n[DATA] Loading from batch files...")
+    
+    # Check if batch files exist
+    batch_dir = data_dir.parent / "train_orthologs" / "batch_files"
+    if not batch_dir.exists():
+        # Fallback to merged expression.parquet
+        batch_dir = data_dir.parent / "train_orthologs"
+    
+    if (batch_dir / "batch_files").exists():
+        batch_dir = batch_dir / "batch_files"
+    
     t0 = time.time()
-    X_train, train_used_counts, train_raw_counts = load_split(
-        data_dir,
-        'train',
-        species,
-        subset=CONFIG['train_subset'],
-        balanced_sampling=CONFIG['balanced_sampling'],
+    X_train, X_val = load_from_batch_files(
+        batch_dir,
+        train_frac=0.8,
+        subset=CONFIG.get('train_subset', None),
+        balanced_sampling=CONFIG.get('balanced_sampling', True),
         seed=CONFIG['seed'],
         verbose=is_main,
     )
     num_samples, num_genes = X_train.shape
     if is_main:
-        print(f"  ✓ Combined: {X_train.shape}, Time: {time.time()-t0:.1f}s")
-        print(f"  ↳ train used counts: {train_used_counts}")
-        print(f"  ↳ train raw counts:  {train_raw_counts}")
-
-    if is_main:
-        print("\n[DATA] Loading validation data...")
-    t0 = time.time()
-    X_val, val_used_counts, val_raw_counts = load_split(
-        data_dir,
-        'val',
-        species,
-        subset=CONFIG['val_subset'],
-        balanced_sampling=CONFIG['balanced_sampling'],
-        seed=CONFIG['seed'] + 1,
-        verbose=is_main,
-    )
-    if is_main:
-        print(f"  ✓ Combined: {X_val.shape}, Time: {time.time()-t0:.1f}s")
-        print(f"  ↳ val used counts: {val_used_counts}")
-        print(f"  ↳ val raw counts:  {val_raw_counts}")
-
+        print(f"  ✓ Time: {time.time()-t0:.1f}s")
+    
     # Apply selected normalization before sending values into REE/model.
     X_train = apply_input_normalization(X_train, CONFIG['normalization'])
     X_val = apply_input_normalization(X_val, CONFIG['normalization'])
@@ -519,7 +476,7 @@ def main():
     # Sanity checks
     if is_main:
         print(f"\n[CHECK] num_genes={num_genes}, "
-              f"train_samples={num_samples}, val_samples={len(X_val)}")
+              f"train_samples={X_train.shape[0]}, val_samples={X_val.shape[0]}")
         assert num_genes > 10000, f"Expected ~16K genes, got {num_genes}"
 
     # ─────────────────────────────────────────────────────────

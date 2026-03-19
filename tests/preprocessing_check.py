@@ -1,5 +1,6 @@
 import argparse
 import random
+import json
 from pathlib import Path
 
 import archs4py as a4
@@ -15,7 +16,7 @@ def section(title: str) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate that expression.parquet matches H5-derived TPM values after "
+            "Validate that batch parquet files match H5-derived TPM values after "
             "the same ortholog and filtering logic used by preprocessing.py."
         )
     )
@@ -169,8 +170,8 @@ def main() -> int:
     args = parse_args()
 
     base_dir = Path(args.base_dir)
-    parquet_path = base_dir / "data/archs4/train_orthologs/expression.parquet"
-    metadata_path = base_dir / "data/archs4/train_orthologs/metadata.csv"
+    batch_dir = base_dir / "data/archs4/train_orthologs/batch_files"
+    samples_meta_path = base_dir / "data/archs4/train_orthologs/samples.json"
     human_h5 = base_dir / "data/archs4/human_gene_v2.5.h5"
     mouse_h5 = base_dir / "data/archs4/mouse_gene_v2.5.h5"
     protein_coding_genes_path = base_dir / "data/ensembl/protein_coding_ortholog_genes.txt"
@@ -178,22 +179,45 @@ def main() -> int:
     human_len_path = base_dir / "data/gencode/gencode_v49_gene_exon_lengths.csv"
     mouse_len_path = base_dir / "data/gencode/gencode_v49_mouse_gene_exon_lengths.csv"
 
-    section("[LOAD] Reading metadata and parquet")
-    meta = pd.read_csv(metadata_path)
-    df = pd.read_parquet(parquet_path).T
+    section("[LOAD] Reading samples metadata and batch files")
+    
+    # Load metadata from samples.json
+    with open(samples_meta_path) as f:
+        samples_list = json.load(f)
+    meta = pd.DataFrame(samples_list)
+    meta = meta.rename(columns={"id": "geo_accession"})
+    
+    # Randomly select batch files to load (don't load all)
+    batch_files = sorted(batch_dir.glob("*.parquet"))
+    if not batch_files:
+        raise FileNotFoundError(f"No batch parquet files found in {batch_dir}")
+    
+    # Load only a random subset of batch files for efficiency
+    n_batches_to_load = min(10, len(batch_files))  # Load at most 10 batch files
+    random.seed(args.seed)
+    selected_batch_files = random.sample(batch_files, n_batches_to_load)
+    
+    print(f"Loading {n_batches_to_load}/{len(batch_files)} random batch files for validation...")
+    df_parts = []
+    for batch_file in selected_batch_files:
+        df_batch = pd.read_parquet(batch_file)
+        df_parts.append(df_batch)
+    
+    df = pd.concat(df_parts, axis=1).T  # Transpose to [samples, genes]
+    print(f"Loaded {df.shape[0]} samples from {n_batches_to_load} batch files")
 
     section("[ID DIAGNOSTICS] Checking sample-ID uniqueness")
     meta_dup_count = int(meta["geo_accession"].duplicated().sum())
     parquet_dup_count = int(df.index.duplicated().sum())
     print(f"Metadata duplicate geo_accession rows: {meta_dup_count}")
-    print(f"Parquet duplicate sample IDs: {parquet_dup_count}")
+    print(f"Batch files duplicate sample IDs: {parquet_dup_count}")
 
     if meta_dup_count > 0:
         dup_ids = meta.loc[meta["geo_accession"].duplicated(), "geo_accession"].head(10).tolist()
         raise ValueError(f"Duplicate metadata geo_accession IDs detected (first 10): {dup_ids}")
     if parquet_dup_count > 0:
         dup_ids = df.index[df.index.duplicated()].unique().tolist()[:10]
-        raise ValueError(f"Duplicate parquet sample IDs detected (first 10): {dup_ids}")
+        raise ValueError(f"Duplicate batch file sample IDs detected (first 10): {dup_ids}")
 
     human_pool = meta[meta["species"] == "human"]["geo_accession"].tolist()
     mouse_pool = meta[meta["species"] == "mouse"]["geo_accession"].tolist()
@@ -215,9 +239,9 @@ def main() -> int:
     df_human = df.loc[human_sample_ids]
     df_mouse = df.loc[mouse_sample_ids]
 
-    section("[CHECK] Parquet extraction")
-    print("PASS: All human samples found in parquet." if set(human_sample_ids).issubset(df.index) else "FAIL: Some human samples missing in parquet.")
-    print("PASS: All mouse samples found in parquet." if set(mouse_sample_ids).issubset(df.index) else "FAIL: Some mouse samples missing in parquet.")
+    section("[CHECK] Batch files extraction")
+    print("PASS: All human samples found in batch files." if set(human_sample_ids).issubset(df.index) else "FAIL: Some human samples missing in batch files.")
+    print("PASS: All mouse samples found in batch files." if set(mouse_sample_ids).issubset(df.index) else "FAIL: Some mouse samples missing in batch files.")
 
     df_human_raw = a4.data.samples(str(human_h5), human_sample_ids).T
     found_human = df_human_raw.index.intersection(human_sample_ids).tolist()
