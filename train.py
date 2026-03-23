@@ -43,16 +43,18 @@ import time
 import json
 from pathlib import Path
 from collections import OrderedDict
+import bisect
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader, DistributedSampler
+from torch.utils.data import Dataset, DataLoader, DistributedSampler, Sampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
 import torch.distributed as dist
 import pandas as pd
+import pyarrow.parquet as pq
 
 from slim_performer_model import SLiMPerformerLayer
 
@@ -88,17 +90,19 @@ CONFIG = {
     'learning_rate': 1e-4,
     'weight_decay': 0,
     'batch_size': 4,
-    'epochs': 5,
+    'epochs': 1,
     'early_stopping': True,
     'patience': 5,
     'seed': 42,
     # Data loading mode: 'preload' (load arrays into RAM) or 'streaming' (on-the-fly parquet reads)
     'data_mode': 'streaming',
-    'stream_cache_size': 8,
-    'num_workers': 4,
+    'stream_cache_size': 2,
+    'num_workers': 1,
+    'prefetch_factor': 2,
+    'persistent_workers': False,
     # Data subset sizes (set to None for all available)
-    'train_subset': 20000,
-    'val_subset': 4000,
+    'train_subset': 2000,
+    'val_subset': 400,
     'balanced_sampling': True,
     'data_dir': './data/archs4/train_orthologs',
     'checkpoint_dir': './checkpoints_performer',
@@ -255,57 +259,201 @@ class ExpressionMLMDataset(Dataset):
 
 
 class StreamingParquetMLMDataset(Dataset):
-    """On-the-fly sample loading from sample-major parquet batches with small LRU cache."""
+    """
+    High-throughput parquet streaming dataset using PyArrow row-group reads.
+
+    Performance features:
+      - Avoids pandas/DataFrame conversion in the hot path.
+      - Reads row groups instead of full files for sample access.
+      - LRU cache stores decoded row-group arrays to reduce repeated I/O.
+      - DDP-aware file sharding (files[rank::world_size]) to reduce contention.
+    """
 
     def __init__(self, batch_dir, sample_indices, normalization='tpm', mask_ratio=0.15,
-                 mask_token=-10, cache_size=2):
+                 mask_token=-10, cache_size=16, rank=0, world_size=1,
+                 ddp_file_split=True):
         self.batch_dir = Path(batch_dir)
         self.batch_files = sorted(self.batch_dir.glob("*.parquet"))
-        self.sample_indices = sample_indices
+        self.rank = int(rank)
+        self.world_size = int(world_size)
         self.normalization = normalization
         self.mask_ratio = mask_ratio
         self.mask_token = mask_token
         self.cache_size = max(1, int(cache_size))
-        self._cache = OrderedDict()  # batch_idx -> np.ndarray [samples, genes]
+        self._cache = OrderedDict()  # (batch_idx, row_group_idx) -> pyarrow.Table
+        self._process_pid = None
+        self._parquet_files = None
+
+        # Build row-group cumulative row starts for fast row lookup.
+        self._row_group_starts = []
+        first_pf = None
+        for file_idx, batch_file in enumerate(self.batch_files):
+            pf = pq.ParquetFile(str(batch_file))
+            if file_idx == 0:
+                first_pf = pf
+            starts = [0]
+            for rg in range(pf.metadata.num_row_groups):
+                starts.append(starts[-1] + pf.metadata.row_group(rg).num_rows)
+            self._row_group_starts.append(starts)
+
+        sample_indices = list(sample_indices)
+
+        # DDP-aware file ownership: each rank gets a disjoint subset of files.
+        if ddp_file_split and self.world_size > 1:
+            my_files = list(range(len(self.batch_files)))[self.rank::self.world_size]
+            my_file_set = set(my_files)
+            self.sample_indices = [s for s in sample_indices if s[0] in my_file_set]
+        else:
+            self.sample_indices = sample_indices
+
+        # Precompute per-sample row-group metadata once to avoid repeated bisect work.
+        # record = (batch_idx, row_group_idx, row_offset)
+        self.records = []
+        self.group_to_indices = {}
+        for i, (batch_idx, sample_row) in enumerate(self.sample_indices):
+            rg_idx, rg_offset = self._locate_row_group(batch_idx, sample_row)
+            self.records.append((batch_idx, rg_idx, rg_offset))
+            key = (batch_idx, rg_idx)
+            self.group_to_indices.setdefault(key, []).append(i)
+
+        # Keep only gene columns in the streaming hot path.
+        first_schema_cols = first_pf.schema_arrow.names
+        self._gene_columns = [c for c in first_schema_cols if c not in ('geo_accession', '__index_level_0__')]
+        self.num_genes = len(self._gene_columns)
+        self.num_mask = max(1, int(self.num_genes * self.mask_ratio))
 
     def __len__(self):
         return len(self.sample_indices)
 
-    def _get_batch_array(self, batch_idx):
-        if batch_idx in self._cache:
-            self._cache.move_to_end(batch_idx)
-            return self._cache[batch_idx]
+    def _table_to_numpy(self, table):
+        # Convert Arrow table [rows, genes] to float32 NumPy for the selected rows only.
+        cols = [table.column(i).combine_chunks().to_numpy(zero_copy_only=False)
+                for i in range(table.num_columns)]
+        return np.column_stack(cols).astype(np.float32, copy=False)
 
-        df = pd.read_parquet(self.batch_files[batch_idx])
-        arr = df.to_numpy(dtype=np.float32, copy=False)  # [samples, genes]
-        self._cache[batch_idx] = arr
-        self._cache.move_to_end(batch_idx)
+    def _locate_row_group(self, batch_idx, sample_row):
+        starts = self._row_group_starts[batch_idx]
+        rg_idx = bisect.bisect_right(starts, sample_row) - 1
+        rg_offset = sample_row - starts[rg_idx]
+        return rg_idx, rg_offset
+
+    def _ensure_process_state(self):
+        current_pid = os.getpid()
+        if self._process_pid == current_pid and self._parquet_files is not None:
+            return
+
+        self._process_pid = current_pid
+        self._cache = OrderedDict()
+        self._parquet_files = [pq.ParquetFile(str(p)) for p in self.batch_files]
+
+    def _get_row_group_table(self, batch_idx, row_group_idx):
+        self._ensure_process_state()
+        key = (batch_idx, row_group_idx)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+
+        table = self._parquet_files[batch_idx].read_row_group(
+            row_group_idx, columns=self._gene_columns, use_threads=True
+        )
+        self._cache[key] = table
+        self._cache.move_to_end(key)
 
         if len(self._cache) > self.cache_size:
             self._cache.popitem(last=False)
 
-        return arr
+        return table
 
     def __getitem__(self, idx):
-        batch_idx, sample_in_batch = self.sample_indices[idx]
-        batch_arr = self._get_batch_array(batch_idx)
-        x = batch_arr[sample_in_batch].copy()
+        # Return lightweight record index; real data is loaded in collate_batch.
+        return int(idx)
+
+    def collate_batch(self, batch_record_indices):
+        """
+        Batch-level row-group loading.
+
+        This reduces Python overhead and avoids repeatedly materializing row-group
+        arrays per individual sample.
+        """
+        B = len(batch_record_indices)
+        x_true = np.empty((B, self.num_genes), dtype=np.float32)
+
+        # Group requests by (file, row_group) to maximize locality.
+        grouped = {}
+        for out_i, rec_i in enumerate(batch_record_indices):
+            batch_idx, rg_idx, rg_off = self.records[rec_i]
+            grouped.setdefault((batch_idx, rg_idx), []).append((out_i, rg_off))
+
+        for (batch_idx, rg_idx), reqs in grouped.items():
+            table = self._get_row_group_table(batch_idx, rg_idx)
+            local_rows = [r for _, r in reqs]
+
+            # Read only requested rows from this row-group.
+            sub = table.take(np.array(local_rows, dtype=np.int64))
+            sub_np = self._table_to_numpy(sub)
+            for j, (out_i, _) in enumerate(reqs):
+                x_true[out_i] = sub_np[j]
 
         if self.normalization == 'log1p_tpm':
-            x = np.log1p(np.maximum(x, 0.0)).astype(np.float32, copy=False)
+            x_true = np.log1p(np.maximum(x_true, 0.0)).astype(np.float32, copy=False)
 
-        num_genes = x.shape[0]
-        num_mask = max(1, int(num_genes * self.mask_ratio))
-        mask_indices = np.random.choice(num_genes, num_mask, replace=False)
+        mask_indices = np.empty((B, self.num_mask), dtype=np.int64)
+        for i in range(B):
+            mask_indices[i] = np.random.choice(self.num_genes, self.num_mask, replace=False)
 
-        x_masked = x.copy()
-        x_masked[mask_indices] = self.mask_token
+        x_masked = x_true.copy()
+        x_masked[np.arange(B)[:, None], mask_indices] = self.mask_token
 
         return (
-            torch.tensor(x_masked, dtype=torch.float32),
-            torch.tensor(x, dtype=torch.float32),
-            torch.tensor(mask_indices, dtype=torch.long),
+            torch.from_numpy(x_masked),
+            torch.from_numpy(x_true),
+            torch.from_numpy(mask_indices),
         )
+
+
+class RowGroupBatchSampler(Sampler):
+    """Batch sampler that keeps batches within the same (file, row_group)."""
+
+    def __init__(self, group_to_indices, batch_size, shuffle=True, seed=42, drop_last=False):
+        self.group_to_indices = group_to_indices
+        self.batch_size = int(batch_size)
+        self.shuffle = bool(shuffle)
+        self.seed = int(seed)
+        self.drop_last = bool(drop_last)
+        self.epoch = 0
+
+        total = 0
+        for idxs in self.group_to_indices.values():
+            if self.drop_last:
+                total += len(idxs) // self.batch_size
+            else:
+                total += (len(idxs) + self.batch_size - 1) // self.batch_size
+        self._len = total
+
+    def set_epoch(self, epoch):
+        self.epoch = int(epoch)
+
+    def __iter__(self):
+        rng = np.random.default_rng(self.seed + self.epoch)
+        keys = list(self.group_to_indices.keys())
+        if self.shuffle:
+            rng.shuffle(keys)
+
+        for k in keys:
+            idxs = np.array(self.group_to_indices[k], dtype=np.int64)
+            if self.shuffle:
+                rng.shuffle(idxs)
+
+            n = len(idxs)
+            stop = (n // self.batch_size) * self.batch_size if self.drop_last else n
+            for start in range(0, stop, self.batch_size):
+                batch = idxs[start:start + self.batch_size]
+                if len(batch) < self.batch_size and self.drop_last:
+                    continue
+                yield batch.tolist()
+
+    def __len__(self):
+        return self._len
 
 
 # ============================================================
@@ -378,16 +526,32 @@ def get_sample_indices(batch_dir, train_subset=None, val_subset=None, balanced_s
         # If manifest exists but produced no sample rows, fallback to parquet index.
         if not all_samples:
             for batch_idx, batch_file in enumerate(batch_files):
-                df = pd.read_parquet(batch_file)
-                sample_ids = df.index.tolist()
+                pf = pq.ParquetFile(str(batch_file))
+                cols = pf.schema_arrow.names
+                idx_col = 'geo_accession' if 'geo_accession' in cols else (
+                    '__index_level_0__' if '__index_level_0__' in cols else None
+                )
+                if idx_col is not None:
+                    table = pf.read(columns=[idx_col], use_threads=True)
+                    sample_ids = table.column(0).to_pylist()
+                else:
+                    sample_ids = [str(i) for i in range(pf.metadata.num_rows)]
                 for sample_idx, sample_id in enumerate(sample_ids):
                     species = sample_to_species.get(sample_id, "unknown")
                     all_samples.append((batch_idx, sample_idx, species))
     else:
-        # Fallback for legacy data without manifest: read index from each parquet.
+        # Fallback for legacy data without manifest: read index column via PyArrow.
         for batch_idx, batch_file in enumerate(batch_files):
-            df = pd.read_parquet(batch_file)
-            sample_ids = df.index.tolist()
+            pf = pq.ParquetFile(str(batch_file))
+            cols = pf.schema_arrow.names
+            idx_col = 'geo_accession' if 'geo_accession' in cols else (
+                '__index_level_0__' if '__index_level_0__' in cols else None
+            )
+            if idx_col is not None:
+                table = pf.read(columns=[idx_col], use_threads=True)
+                sample_ids = table.column(0).to_pylist()
+            else:
+                sample_ids = [str(i) for i in range(pf.metadata.num_rows)]
             for sample_idx, sample_id in enumerate(sample_ids):
                 species = sample_to_species.get(sample_id, "unknown")
                 all_samples.append((batch_idx, sample_idx, species))
@@ -494,16 +658,21 @@ def load_batch_data(batch_dir, sample_indices, normalization='tpm', verbose=True
         batch_to_samples[batch_idx].append((idx, sample_in_batch))
     
     # Pre-allocate output array (sample-major parquet: [samples, genes]).
-    first_df = pd.read_parquet(batch_files[0])
-    num_genes = first_df.shape[1]
+    first_pf = pq.ParquetFile(str(batch_files[0]))
+    gene_cols = [c for c in first_pf.schema_arrow.names
+                 if c not in ('geo_accession', '__index_level_0__')]
+    num_genes = len(gene_cols)
     result = np.empty((len(sample_indices), num_genes), dtype=np.float32)
     
     # Load batch-by-batch and gather selected sample rows.
     total_batches = len(batch_to_samples)
     for i, (batch_idx, idx_pairs) in enumerate(batch_to_samples.items(), start=1):
-        df = pd.read_parquet(batch_files[batch_idx])
+        table = pq.read_table(batch_files[batch_idx], columns=gene_cols, use_threads=True)
+        cols = [table.column(j).combine_chunks().to_numpy(zero_copy_only=False)
+                for j in range(table.num_columns)]
+        data = np.stack(cols, axis=1).astype(np.float32, copy=False)
         for out_idx, sample_in_batch in idx_pairs:
-            result[out_idx] = df.iloc[sample_in_batch].to_numpy(dtype=np.float32, copy=False)
+            result[out_idx] = data[sample_in_batch]
 
         if verbose and (i % 25 == 0 or i == total_batches):
             print(f"  ...loaded {i}/{total_batches} batch files", flush=True)
@@ -523,8 +692,9 @@ def get_num_genes_from_batches(batch_dir):
     batch_files = sorted(Path(batch_dir).glob("*.parquet"))
     if not batch_files:
         raise FileNotFoundError(f"No parquet files found in {batch_dir}")
-    first_df = pd.read_parquet(batch_files[0])
-    return first_df.shape[1]
+    pf = pq.ParquetFile(str(batch_files[0]))
+    cols = [c for c in pf.schema_arrow.names if c not in ('geo_accession', '__index_level_0__')]
+    return len(cols)
 
 
 def format_float_for_tag(v: float) -> str:
@@ -630,6 +800,9 @@ def main():
             mask_ratio=CONFIG['mask_ratio'],
             mask_token=CONFIG['mask_token'],
             cache_size=CONFIG.get('stream_cache_size', 2),
+            rank=rank,
+            world_size=world_size,
+            ddp_file_split=True,
         )
         val_ds = StreamingParquetMLMDataset(
             batch_dir,
@@ -638,6 +811,9 @@ def main():
             mask_ratio=CONFIG['mask_ratio'],
             mask_token=CONFIG['mask_token'],
             cache_size=CONFIG.get('stream_cache_size', 2),
+            rank=rank,
+            world_size=world_size,
+            ddp_file_split=True,
         )
         num_genes = get_num_genes_from_batches(batch_dir)
     else:
@@ -665,19 +841,59 @@ def main():
     # ─────────────────────────────────────────────────────────
     # DATASETS & DATALOADERS
     # ─────────────────────────────────────────────────────────
-    train_sampler = DistributedSampler(train_ds, num_replicas=world_size,
-                                        rank=rank, shuffle=True, seed=42)
-    val_sampler = DistributedSampler(val_ds, num_replicas=world_size,
-                                      rank=rank, shuffle=False, seed=42)
+    if data_mode == 'streaming':
+        train_batch_sampler = RowGroupBatchSampler(
+            train_ds.group_to_indices,
+            batch_size=CONFIG['batch_size'],
+            shuffle=True,
+            seed=CONFIG.get('seed', 42),
+            drop_last=False,
+        )
+        val_batch_sampler = RowGroupBatchSampler(
+            val_ds.group_to_indices,
+            batch_size=CONFIG['batch_size'],
+            shuffle=False,
+            seed=CONFIG.get('seed', 42),
+            drop_last=False,
+        )
+    else:
+        train_sampler = DistributedSampler(train_ds, num_replicas=world_size,
+                                            rank=rank, shuffle=True, seed=42)
+        val_sampler = DistributedSampler(val_ds, num_replicas=world_size,
+                                          rank=rank, shuffle=False, seed=42)
 
-    train_loader = DataLoader(train_ds, batch_size=CONFIG['batch_size'],
-                              sampler=train_sampler,
-                              num_workers=int(CONFIG.get('num_workers', 2)),
-                              pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=CONFIG['batch_size'],
-                            sampler=val_sampler,
-                            num_workers=int(CONFIG.get('num_workers', 2)),
-                            pin_memory=True)
+    num_workers = int(CONFIG.get('num_workers', 0))
+    if data_mode == 'streaming' and num_workers > 0:
+        if is_main:
+            print("[DATA] Streaming mode forcing num_workers=0 to avoid per-worker row-group cache OOM.", flush=True)
+        num_workers = 0
+
+    loader_kwargs = {
+        'num_workers': num_workers,
+        'pin_memory': True,
+    }
+    if num_workers > 0:
+        loader_kwargs['prefetch_factor'] = int(CONFIG.get('prefetch_factor', 2))
+        loader_kwargs['persistent_workers'] = bool(CONFIG.get('persistent_workers', False))
+
+    if data_mode == 'streaming':
+        train_loader = DataLoader(
+            train_ds,
+            batch_sampler=train_batch_sampler,
+            collate_fn=train_ds.collate_batch,
+            **loader_kwargs,
+        )
+        val_loader = DataLoader(
+            val_ds,
+            batch_sampler=val_batch_sampler,
+            collate_fn=val_ds.collate_batch,
+            **loader_kwargs,
+        )
+    else:
+        train_loader = DataLoader(train_ds, batch_size=CONFIG['batch_size'],
+                                  sampler=train_sampler, **loader_kwargs)
+        val_loader = DataLoader(val_ds, batch_size=CONFIG['batch_size'],
+                                sampler=val_sampler, **loader_kwargs)
 
     if is_main:
         print(f"\n[DATA] Train: {len(train_ds):,} samples, {len(train_loader)} batches")
@@ -789,7 +1005,10 @@ def main():
 
     for epoch in range(CONFIG['epochs']):
         epoch_start = time.time()
-        train_sampler.set_epoch(epoch)
+        if data_mode == 'streaming':
+            train_batch_sampler.set_epoch(epoch)
+        else:
+            train_sampler.set_epoch(epoch)
 
         # --- Train ---
         model.train()
