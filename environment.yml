@@ -1,0 +1,19 @@
+# Conda env skeleton. On Savio you often still need a CUDA-matched PyTorch build:
+#   conda activate bridge-rna
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+#
+#   conda env create -f environment.yml
+#   conda activate bridge-rna
+
+name: bridge-rna
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy>=1.20
+  - pandas>=1.3
+  - pyarrow>=10.0
+  - matplotlib>=3.5
+  - pip
+  - pip:
+      - wandb>=0.15

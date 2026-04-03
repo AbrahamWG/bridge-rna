@@ -712,10 +712,45 @@ def build_run_tag(cfg: dict) -> str:
     )
 
 
+def _apply_runtime_env_config():
+    """
+    Optional overrides for cluster smoke tests and custom paths (all ranks must see the same CONFIG).
+
+    Environment variables:
+      BRIDGE_RNA_DATA_DIR      — override CONFIG['data_dir']
+      BRIDGE_RNA_CHECKPOINT_DIR — override CONFIG['checkpoint_dir']
+      BRIDGE_RNA_SMOKE         — if 1/true/yes, use tiny subsets and short run (see below)
+      BRIDGE_RNA_TRAIN_SUBSET, BRIDGE_RNA_VAL_SUBSET, BRIDGE_RNA_EPOCHS, BRIDGE_RNA_BATCH_SIZE
+      BRIDGE_RNA_DATA_MODE     — default streaming under smoke
+      BRIDGE_RNA_HIDDEN_DIM    — smaller model for smoke (default 128)
+    """
+    data_dir = os.environ.get("BRIDGE_RNA_DATA_DIR")
+    if data_dir:
+        CONFIG["data_dir"] = data_dir.strip()
+
+    ckpt_dir = os.environ.get("BRIDGE_RNA_CHECKPOINT_DIR")
+    if ckpt_dir:
+        CONFIG["checkpoint_dir"] = ckpt_dir.strip()
+
+    smoke = os.environ.get("BRIDGE_RNA_SMOKE", "").lower() in ("1", "true", "yes")
+    if smoke:
+        CONFIG["train_subset"] = int(os.environ.get("BRIDGE_RNA_TRAIN_SUBSET", "32"))
+        CONFIG["val_subset"] = int(os.environ.get("BRIDGE_RNA_VAL_SUBSET", "8"))
+        CONFIG["epochs"] = int(os.environ.get("BRIDGE_RNA_EPOCHS", "1"))
+        CONFIG["batch_size"] = int(os.environ.get("BRIDGE_RNA_BATCH_SIZE", "2"))
+        CONFIG["early_stopping"] = False
+        CONFIG["data_mode"] = os.environ.get("BRIDGE_RNA_DATA_MODE", "streaming")
+        hd = int(os.environ.get("BRIDGE_RNA_HIDDEN_DIM", "128"))
+        CONFIG["hidden_dim"] = hd
+        CONFIG["ffn_dim"] = hd * 4
+
+
 # ============================================================
 # TRAINING (DDP)
 # ============================================================
 def main():
+    _apply_runtime_env_config()
+
     print("\n[STARTUP] train.py started - initializing DDP...", flush=True)
     script_start = time.time()
 
@@ -738,8 +773,11 @@ def main():
     # WANDB (init early so sweep can override CONFIG)
     # ─────────────────────────────────────────────────────────
     if is_main and HAS_WANDB:
+        _wandb_entity = os.environ.get("WANDB_ENTITY")
         wandb.init(
-            project="expression-performer",
+            project=os.environ.get("WANDB_PROJECT", "expression-performer"),
+            entity=_wandb_entity if _wandb_entity else None,
+            name=os.environ.get("WANDB_RUN_NAME") or None,
             config=CONFIG,
         )
         # When running a sweep, wandb.config overrides CONFIG values

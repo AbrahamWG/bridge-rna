@@ -16,10 +16,27 @@ datasets/
 *.parquet
 *.h5
 
-# models
+# Local-only: reference pulls, paths, pipeline notes (do not push)
+reference_subset/
+
+# Local project notes (may contain paths, data layout, mentor context)
+project_state.md
+
+# models & experiment artifacts (local only)
 checkpoints/
+checkpoints_performer/
+checkpoints_performer_single/
+wandb/
+wandb_job_*/
+checkpoints_smoke_*/
 *.pt
 *.pth
 
+# Slurm
+logs/
+
 # misc
 .DS_Store
+
+# Cursor / IDE
+.cursor/
