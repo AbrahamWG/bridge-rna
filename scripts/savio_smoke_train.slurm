@@ -16,14 +16,16 @@
 # Savio smoke test for train.py (single GPU, tiny data subset via env).
 #
 # BEFORE YOUR FIRST RUN (order matters):
-#   1) Dependencies: create a venv or conda env from requirements.txt /
-#      environment.yml and install a CUDA PyTorch build for Savio.
+#   1) Dependencies: Python 3.12+ (not /usr/bin/python3). Use conda env from
+#      environment.yml or a venv, then install CUDA PyTorch for Savio.
 #   2) Weights & Biases: on the login node run `wandb login` once, OR set
 #      WANDB_API_KEY (see https://wandb.ai/authorize). Use a dedicated
 #      WANDB_PROJECT for your runs so you do not mix with your mentor's.
 #   3) Data: set BRIDGE_RNA_DATA_DIR to the directory that contains
-#      batch_files/*.parquet (or Parquet files directly). The smoke job only
-#      loads a small subset (see BRIDGE_RNA_* below).
+#      batch_files/*.parquet (or Parquet files directly). If Brian's folder mixes
+#      input_chunk_*.parquet with processed_mouse_*.parquet, run first:
+#        bash scripts/setup_smoke_data_symlinks.sh
+#      then export BRIDGE_RNA_DATA_DIR=/global/scratch/users/abrahamguan/bridge-rna-smoke-data
 #   4) Optional: remove stale local caches — `rm -rf ./wandb` in the repo
 #      (already gitignored) so this job writes a fresh tree under WANDB_DIR.
 #
@@ -52,9 +54,10 @@ mkdir -p "${WANDB_DIR}"
 # source /path/to/venv/bin/activate
 # conda activate bridge-rna
 
-# --- Optional: load Savio modules if you use them instead of venv ---
-# module load python/3.11
-# module load pytorch/...
+# --- Savio: conda is provided as anaconda3 (not "conda") ---
+#   module load anaconda3/2024.10-1-11.4
+#   eval "$(conda shell.bash hook)"
+#   conda activate bridge-rna
 
 # Smoke test: tiny subsets + 1 epoch (see train.py _apply_runtime_env_config)
 export BRIDGE_RNA_SMOKE=1
