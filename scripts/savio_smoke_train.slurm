@@ -2,12 +2,22 @@
 #SBATCH --job-name=bridge-rna-smoke
 # Charge account from `sshare -U` — not your username. ic_cdss170 matches Brian’s shared scratch (ic_cdss170).
 #SBATCH --account=ic_cdss170
-# Savio retired savio2_gpu; use savio3_gpu or savio4_gpu (see docs-research-it.berkeley.edu Savio "GPU Jobs").
-# Low-priority queue often works without a faculty GPU condo QoS:
+# Savio retired savio2_gpu. Current GPU partitions: savio3_gpu, savio4_gpu, savio2_1080ti (see Research IT
+# "Specifying Job Resources" / "Submitting Jobs": docs-research-it.berkeley.edu Savio user guide).
+#
+# --- Active block (savio3 + low priority + explicit GPU type) ---
 #SBATCH --partition=savio3_gpu
 #SBATCH --qos=savio_lowprio
-# savio3_gpu requires a GPU type, e.g. GTX2080TI (see: sinfo -p savio3_gpu; scheduler-examples GPU script)
 #SBATCH --gres=gpu:GTX2080TI:1
+#
+# --- FALLBACK for ic_cdss170: use the alternate script instead of editing lines below ---
+#   sbatch scripts/savio_smoke_train_savio2_1080ti.slurm
+# Or manually swap this block for:
+#   #SBATCH --partition=savio2_1080ti
+#   #SBATCH --qos=savio_normal
+#   #SBATCH --gres=gpu:1
+#   #SBATCH --mem=32G
+# (Drop savio_lowprio and the GTX2080TI gres when using savio2_1080ti.)
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -22,6 +32,8 @@
 # On Savio:
 #   mkdir -p logs
 #   sbatch scripts/savio_smoke_train.slurm
+#   # or if partition/QoS fails for ic_cdss170:
+#   sbatch scripts/savio_smoke_train_savio2_1080ti.slurm
 #
 # Data default: Brian processed_mouse symlinks — run first if needed:
 #   bash scripts/setup_smoke_data_symlinks.sh
