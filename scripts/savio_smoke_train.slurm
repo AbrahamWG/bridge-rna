@@ -2,13 +2,16 @@
 #SBATCH --job-name=bridge-rna-smoke
 # Charge account from `sshare -U` — not your username. ic_cdss170 matches Brian’s shared scratch (ic_cdss170).
 #SBATCH --account=ic_cdss170
-#SBATCH --partition=savio2_gpu
-#SBATCH --qos=savio_normal
+# Savio retired savio2_gpu; use savio3_gpu or savio4_gpu (see docs-research-it.berkeley.edu Savio "GPU Jobs").
+# Low-priority queue often works without a faculty GPU condo QoS:
+#SBATCH --partition=savio3_gpu
+#SBATCH --qos=savio_lowprio
+# savio3_gpu requires a GPU type, e.g. GTX2080TI (see: sinfo -p savio3_gpu; scheduler-examples GPU script)
+#SBATCH --gres=gpu:GTX2080TI:1
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:1
-#SBATCH --mem=16G
+# Memory on GPU partitions scales with cores; omit --mem unless you need more (request extra cores).
 #SBATCH --time=00:05:00
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
