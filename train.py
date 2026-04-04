@@ -54,9 +54,30 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
 import torch.distributed as dist
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from slim_performer_model import SLiMPerformerLayer
+
+
+def _parquet_numeric_gene_columns(schema: pa.Schema) -> list:
+    """
+    Column names to use as gene expression: numeric types only.
+
+    Excludes geo_accession / pandas index and drops string (or other non-numeric)
+    columns so mentor Parquet with differently named sample-ID columns cannot be
+    mistaken for gene features.
+    """
+    excluded = {'geo_accession', '__index_level_0__'}
+    out = []
+    for i in range(schema.num_fields):
+        field = schema.field(i)
+        if field.name in excluded:
+            continue
+        t = field.type
+        if pa.types.is_floating(t) or pa.types.is_integer(t):
+            out.append(field.name)
+    return out
 
 try:
     import wandb
@@ -316,9 +337,8 @@ class StreamingParquetMLMDataset(Dataset):
             key = (batch_idx, rg_idx)
             self.group_to_indices.setdefault(key, []).append(i)
 
-        # Keep only gene columns in the streaming hot path.
-        first_schema_cols = first_pf.schema_arrow.names
-        self._gene_columns = [c for c in first_schema_cols if c not in ('geo_accession', '__index_level_0__')]
+        # Keep only numeric gene columns in the streaming hot path (skip string IDs).
+        self._gene_columns = _parquet_numeric_gene_columns(first_pf.schema_arrow)
         self.num_genes = len(self._gene_columns)
         self.num_mask = max(1, int(self.num_genes * self.mask_ratio))
 
@@ -668,8 +688,7 @@ def load_batch_data(batch_dir, sample_indices, normalization='tpm', verbose=True
     
     # Pre-allocate output array (sample-major parquet: [samples, genes]).
     first_pf = pq.ParquetFile(str(batch_files[0]))
-    gene_cols = [c for c in first_pf.schema_arrow.names
-                 if c not in ('geo_accession', '__index_level_0__')]
+    gene_cols = _parquet_numeric_gene_columns(first_pf.schema_arrow)
     num_genes = len(gene_cols)
     result = np.empty((len(sample_indices), num_genes), dtype=np.float32)
     
@@ -702,8 +721,7 @@ def get_num_genes_from_batches(batch_dir):
     if not batch_files:
         raise FileNotFoundError(f"No parquet files found in {batch_dir}")
     pf = pq.ParquetFile(str(batch_files[0]))
-    cols = [c for c in pf.schema_arrow.names if c not in ('geo_accession', '__index_level_0__')]
-    return len(cols)
+    return len(_parquet_numeric_gene_columns(pf.schema_arrow))
 
 
 def format_float_for_tag(v: float) -> str:
