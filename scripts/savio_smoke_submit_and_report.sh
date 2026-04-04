@@ -2,8 +2,7 @@
 # Submit smoke training, wait until the job leaves the queue, then print sacct +
 # tails of Slurm .out / .err (one place to see success or failure).
 #
-# Default Slurm file: savio2 1080 Ti (known-good for ic_cdss170). Override for Savio3:
-#   SLURM_SCRIPT=scripts/savio_smoke_train.slurm bash scripts/savio_smoke_submit_and_report.sh
+# Default Slurm file: savio2 1080 Ti smoke. Override with SLURM_SCRIPT=... if needed.
 #
 # Usage (from repo root on Savio):
 #   bash scripts/savio_smoke_submit_and_report.sh

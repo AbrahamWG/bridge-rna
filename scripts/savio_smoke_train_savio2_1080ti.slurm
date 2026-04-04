@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=bridge-rna-smoke-1080ti
-# Same as savio_smoke_train.slurm but uses savio2_1080ti + savio_normal (known-good for ic_cdss170 / CDSS).
+# Savio GPU smoke test: savio2_1080ti + savio_normal (known-good for ic_cdss170 / CDSS).
 # Ref: https://docs-research-it.berkeley.edu/services/high-performance-computing/user-guide/running-your-jobs/submitting-jobs/
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
@@ -18,7 +18,6 @@
 
 # -----------------------------------------------------------------------------
 # Submit: sbatch scripts/savio_smoke_train_savio2_1080ti.slurm
-# Use this if savio3_gpu / savio_lowprio submission fails for your account.
 # -----------------------------------------------------------------------------
 
 set -euo pipefail

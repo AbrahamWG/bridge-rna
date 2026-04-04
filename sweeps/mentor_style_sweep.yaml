@@ -1,0 +1,55 @@
+# W&B hyperparameter sweep aligned with mentor ranges (parallel coords / val_loss driver analysis).
+# Metric: val_mse (fair across loss types; logged each epoch from train.py).
+#
+# Create the sweep (run on laptop or login node with wandb CLI):
+#   wandb sweep --project bridge-rna sweeps/mentor_style_sweep.yaml
+# Then submit one or more Savio jobs (each runs a single sweep trial):
+#   export WANDB_SWEEP_ID="entity/bridge-rna/sweep_xxxx"
+#   sbatch scripts/savio_wandb_sweep_agent.slurm
+#
+# See docs/savio_wandb_sweeps.md
+
+program: train.py
+method: random
+metric:
+  name: val_mse
+  goal: minimize
+
+parameters:
+  batch_size:
+    values: [4, 8, 12, 16]
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.00004
+    max: 0.00028
+  weight_decay:
+    distribution: uniform
+    min: 0.0
+    max: 0.05
+  mask_ratio:
+    distribution: uniform
+    min: 0.10
+    max: 0.15
+  ffn_dim:
+    distribution: int_uniform
+    min: 1000
+    max: 2100
+  num_layers:
+    values: [2, 3, 4]
+  hidden_dim:
+    distribution: int_uniform
+    min: 240
+    max: 520
+  ree_base:
+    distribution: uniform
+    min: 40
+    max: 200
+  feature_type:
+    values: ["sqr", "favor+", "relu", "elu+1"]
+
+command:
+  - ${env}
+  - torchrun
+  - --standalone
+  - --nproc_per_node=1
+  - ${program}

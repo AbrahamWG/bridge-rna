@@ -765,6 +765,24 @@ def build_run_tag(cfg: dict) -> str:
     )
 
 
+def _coerce_config_types(cfg: dict) -> None:
+    """W&B sweeps may return floats for integer hyperparameters."""
+    int_keys = (
+        'hidden_dim', 'ffn_dim', 'num_layers', 'num_heads', 'batch_size',
+        'epochs', 'train_subset', 'val_subset', 'stream_cache_size',
+        'num_workers', 'prefetch_factor', 'patience', 'seed', 'mask_token',
+    )
+    for k in int_keys:
+        if k in cfg and cfg[k] is not None:
+            cfg[k] = int(cfg[k])
+    float_keys = (
+        'learning_rate', 'weight_decay', 'mask_ratio', 'ree_base', 'huber_beta',
+    )
+    for k in float_keys:
+        if k in cfg and cfg[k] is not None:
+            cfg[k] = float(cfg[k])
+
+
 def _apply_runtime_env_config():
     """
     Optional overrides for cluster smoke tests and custom paths (all ranks must see the same CONFIG).
@@ -779,6 +797,12 @@ def _apply_runtime_env_config():
       BRIDGE_RNA_LOSS          — mse (default) or smooth_l1 (Huber / SmoothL1 on masked genes)
       BRIDGE_RNA_HUBER_BETA    — beta for smooth_l1 (default 1.0)
       When BRIDGE_RNA_SMOKE is off, EPOCHS / TRAIN_SUBSET / VAL_SUBSET / BATCH_SIZE still apply if set.
+      BRIDGE_RNA_USE_ALL_SAMPLES — if 1/true: train_subset and val_subset become None → 80/20 split of
+        every sample found under the data dir (ignores BRIDGE_RNA_TRAIN_SUBSET / VAL_SUBSET).
+      Non-smoke architecture / optimizer (manual runs; W&B sweep overrides if set):
+      BRIDGE_RNA_FFN_DIM, BRIDGE_RNA_NUM_LAYERS, BRIDGE_RNA_NUM_HEADS,
+      BRIDGE_RNA_LEARNING_RATE, BRIDGE_RNA_WEIGHT_DECAY, BRIDGE_RNA_MASK_RATIO, BRIDGE_RNA_REE_BASE,
+      BRIDGE_RNA_FEATURE_TYPE (e.g. sqr, favor+)
     """
     data_dir = os.environ.get("BRIDGE_RNA_DATA_DIR")
     if data_dir:
@@ -803,12 +827,39 @@ def _apply_runtime_env_config():
         # Non-smoke: optional cluster overrides (same env names as smoke where sensible).
         if os.environ.get("BRIDGE_RNA_EPOCHS"):
             CONFIG["epochs"] = int(os.environ["BRIDGE_RNA_EPOCHS"])
-        if os.environ.get("BRIDGE_RNA_TRAIN_SUBSET"):
-            CONFIG["train_subset"] = int(os.environ["BRIDGE_RNA_TRAIN_SUBSET"])
-        if os.environ.get("BRIDGE_RNA_VAL_SUBSET"):
-            CONFIG["val_subset"] = int(os.environ["BRIDGE_RNA_VAL_SUBSET"])
+        use_all = os.environ.get("BRIDGE_RNA_USE_ALL_SAMPLES", "").lower() in (
+            "1", "true", "yes",
+        )
+        if use_all:
+            CONFIG["train_subset"] = None
+            CONFIG["val_subset"] = None
+        else:
+            if os.environ.get("BRIDGE_RNA_TRAIN_SUBSET"):
+                CONFIG["train_subset"] = int(os.environ["BRIDGE_RNA_TRAIN_SUBSET"])
+            if os.environ.get("BRIDGE_RNA_VAL_SUBSET"):
+                CONFIG["val_subset"] = int(os.environ["BRIDGE_RNA_VAL_SUBSET"])
         if os.environ.get("BRIDGE_RNA_BATCH_SIZE"):
             CONFIG["batch_size"] = int(os.environ["BRIDGE_RNA_BATCH_SIZE"])
+        _env_int = {
+            "BRIDGE_RNA_HIDDEN_DIM": "hidden_dim",
+            "BRIDGE_RNA_FFN_DIM": "ffn_dim",
+            "BRIDGE_RNA_NUM_LAYERS": "num_layers",
+            "BRIDGE_RNA_NUM_HEADS": "num_heads",
+        }
+        for env, key in _env_int.items():
+            if os.environ.get(env):
+                CONFIG[key] = int(os.environ[env])
+        _env_float = {
+            "BRIDGE_RNA_LEARNING_RATE": "learning_rate",
+            "BRIDGE_RNA_WEIGHT_DECAY": "weight_decay",
+            "BRIDGE_RNA_MASK_RATIO": "mask_ratio",
+            "BRIDGE_RNA_REE_BASE": "ree_base",
+        }
+        for env, key in _env_float.items():
+            if os.environ.get(env):
+                CONFIG[key] = float(os.environ[env])
+        if os.environ.get("BRIDGE_RNA_FEATURE_TYPE"):
+            CONFIG["feature_type"] = os.environ["BRIDGE_RNA_FEATURE_TYPE"].strip()
 
     if os.environ.get("BRIDGE_RNA_LOSS"):
         CONFIG["loss"] = os.environ["BRIDGE_RNA_LOSS"].strip().lower()
@@ -855,8 +906,8 @@ def main():
         for key in CONFIG:
             if key in wandb.config:
                 CONFIG[key] = wandb.config[key]
-        # Always derive ffn_dim from hidden_dim (4x multiplier)
-        CONFIG['ffn_dim'] = CONFIG['hidden_dim'] * 4
+        _coerce_config_types(CONFIG)
+        # Mentor-style sweeps vary ffn_dim independently of hidden_dim; do not force 4× here.
         wandb.config.update(CONFIG, allow_val_change=True)
 
     # Broadcast CONFIG from rank 0 so all ranks use the same hyperparams

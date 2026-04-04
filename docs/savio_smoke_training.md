@@ -52,7 +52,7 @@ export BRIDGE_RNA_DATA_DIR=/global/scratch/users/<USER>/bridge-rna-smoke-data
 
 ## Longer run while away (optional “dinner” job)
 
-After smoke passes, you can submit a **multi-epoch** job that still uses the same scratch data dir but **does not** use smoke mode (`BRIDGE_RNA_SMOKE=0`). See `scripts/savio_dev_train_savio2_1080ti.slurm` (default **5 epochs**, **2000 / 400** train/val, **3 h** wall clock). Requires a current `train.py` that honors `BRIDGE_RNA_EPOCHS` / subsets when smoke is off.
+After smoke passes, you can submit a **multi-epoch** job that still uses the same scratch data dir but **does not** use smoke mode (`BRIDGE_RNA_SMOKE=0`). See `scripts/savio_dev_train_savio2_1080ti.slurm` (default **5 epochs**, **`BRIDGE_RNA_USE_ALL_SAMPLES=1`** → **80/20 train/val on all samples** in the data dir, **24 h** wall clock). For fixed small subsets instead: `export BRIDGE_RNA_USE_ALL_SAMPLES=0` and set `BRIDGE_RNA_TRAIN_SUBSET` / `BRIDGE_RNA_VAL_SUBSET`.
 
 ```bash
 sbatch scripts/savio_dev_train_savio2_1080ti.slurm
@@ -72,36 +72,7 @@ sbatch scripts/savio_smoke_train_savio2_1080ti.slurm
 
 The script sets `BRIDGE_RNA_DATA_DIR`, `BRIDGE_RNA_SMOKE`, checkpoint dir, and `torchrun` for a single GPU.
 
-**Alternative:** `scripts/savio_smoke_train.slurm` targets **savio3** GPUs (`savio3_gpu` / `savio_lowprio`). Use whichever matches your allocation and passes `sbatch` validation.
-
-### Verifying Savio3 (first-time or after past failures)
-
-Use this when you want to confirm **`savio3_gpu` + `savio_lowprio`** works for your account (CDSS `ic_cdss170` has had mixed results vs `savio2_1080ti`).
-
-1. **On the login node** (conda env as in [One-time setup](#one-time-setup)):
-
-   ```bash
-   cd /global/scratch/users/<USER>/bridge-rna
-   git pull   # pick up latest scripts
-   mkdir -p logs
-   sbatch scripts/savio_smoke_train.slurm
-   ```
-
-2. **Or** use the submit-and-report helper (override the default 1080 Ti script):
-
-   ```bash
-   SLURM_SCRIPT=scripts/savio_smoke_train.slurm bash scripts/savio_smoke_submit_and_report.sh
-   ```
-
-3. **Success criteria**
-   - `sacct` shows **`COMPLETED`** and **`ExitCode=0:0`** for the main job.
-   - `logs/slurm-<JOBID>.out` contains **`=== GPU sanity (savio3 smoke) ===`**, **`nvidia-smi -L`** listing at least one GPU, and **`torch.cuda.is_available(): True`**, then normal training/validation lines from `train.py`.
-
-4. **If `sbatch` rejects the job** (partition/QoS/GRES): check [Submitting jobs](https://docs-research-it.berkeley.edu/services/high-performance-computing/user-guide/running-your-jobs/submitting-jobs/) and your `sshare -U` / `sacctmgr` association. Your group may not have access to `savio3_gpu` or `savio_lowprio` — use `scripts/savio_smoke_train_savio2_1080ti.slurm` until IT or your PI adjusts the allocation.
-
-5. **If the job starts but CUDA is broken** (`torch.cuda.is_available(): False`, or `nvidia-smi` hangs): treat like [GPU nodes: hangs and excludes](#gpu-nodes-hangs-and-excludes) — note **NodeList** from `sacct`, try another run, and ask admins if a node is bad.
-
-W&B runs from this script default to **`WANDB_RUN_NAME=smoke-savio3-<JOBID>`** so they are easy to tell apart from 1080 Ti smoke jobs.
+If **`sbatch`** fails with *Invalid account or account/partition combination*, the Slurm **account** in `#SBATCH --account=` cannot use that **partition** / **QoS** — check `sshare -U` and [Submitting jobs](https://docs-research-it.berkeley.edu/services/high-performance-computing/user-guide/running-your-jobs/submitting-jobs/), or ask Research IT to confirm your allocation.
 
 ## Monitor jobs and logs
 
@@ -172,7 +143,7 @@ Manual cycle (`sbatch`, `tail -f`, `sacct`, open `.err`) gets old fast. Options:
    bash scripts/savio_smoke_submit_and_report.sh 33196453
    ```
 
-   Override which Slurm file to submit: `SLURM_SCRIPT=scripts/savio_smoke_train.slurm bash scripts/savio_smoke_submit_and_report.sh`
+   Override which Slurm file to submit (example — longer dev job): `SLURM_SCRIPT=scripts/savio_dev_train_savio2_1080ti.slurm bash scripts/savio_smoke_submit_and_report.sh`
 
 2. **Slurm email** — add to the smoke `.slurm` file (optional):
 
@@ -193,6 +164,10 @@ Manual cycle (`sbatch`, `tail -f`, `sacct`, open `.err`) gets old fast. Options:
    Full training still needs a GPU, but syntax/import bugs fail in seconds.
 
 4. **W&B** — keep using the project UI for metrics; the wrapper script is for **exit codes and tracebacks** in one place.
+
+## W&B sweeps (hyperparameter search)
+
+See **`docs/savio_wandb_sweeps.md`** — mentor-style random sweeps via `sweeps/mentor_style_sweep.yaml` and `scripts/savio_wandb_sweep_agent.slurm`.
 
 ## Official Savio docs
 
