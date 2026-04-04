@@ -627,6 +627,15 @@ def get_sample_indices(batch_dir, train_subset=None, val_subset=None, balanced_s
 
     train_indices = shuffled[:train_count]
     val_indices = shuffled[train_count:train_count + val_count]
+
+    # Downstream loaders expect (batch_idx, row_in_batch) pairs. The multi-species
+    # balanced path already uses 2-tuples; the single-species subsample path can
+    # still carry (batch_idx, row, species) from the manifest walk.
+    def _pairs_only(indices):
+        return [(t[0], t[1]) for t in indices]
+
+    train_indices = _pairs_only(train_indices)
+    val_indices = _pairs_only(val_indices)
     
     if verbose:
         print(f"       Train: {len(train_indices):,} samples", flush=True)
