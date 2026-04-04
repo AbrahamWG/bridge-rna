@@ -60,6 +60,18 @@ import pyarrow.parquet as pq
 from slim_performer_model import SLiMPerformerLayer
 
 
+def _masked_gene_loss(pred_i, true_i, idxs, loss_name, huber_beta=1.0):
+    """Single-sample loss over masked gene positions (1D slices)."""
+    pi = pred_i[idxs]
+    ti = true_i[idxs]
+    ln = (loss_name or 'mse').lower()
+    if ln == 'smooth_l1':
+        return F.smooth_l1_loss(pi, ti, beta=huber_beta)
+    if ln != 'mse':
+        raise ValueError(f"Unknown loss: {loss_name!r} (use 'mse' or 'smooth_l1')")
+    return F.mse_loss(pi, ti)
+
+
 def _parquet_stored_value_type(t):
     """Unwrap dictionary-encoded columns to the stored value type."""
     while pa.types.is_dictionary(t):
@@ -138,6 +150,9 @@ CONFIG = {
     'balanced_sampling': True,
     'data_dir': './data/archs4/train_orthologs',
     'checkpoint_dir': './checkpoints_performer',
+    # Masked reconstruction: 'mse' or 'smooth_l1' (Huber / SmoothL1; less sensitive to outliers)
+    'loss': 'mse',
+    'huber_beta': 1.0,
 }
 
 
@@ -761,6 +776,8 @@ def _apply_runtime_env_config():
       BRIDGE_RNA_TRAIN_SUBSET, BRIDGE_RNA_VAL_SUBSET, BRIDGE_RNA_EPOCHS, BRIDGE_RNA_BATCH_SIZE
       BRIDGE_RNA_DATA_MODE     — default streaming under smoke
       BRIDGE_RNA_HIDDEN_DIM    — smaller model for smoke (default 128)
+      BRIDGE_RNA_LOSS          — mse (default) or smooth_l1 (Huber / SmoothL1 on masked genes)
+      BRIDGE_RNA_HUBER_BETA    — beta for smooth_l1 (default 1.0)
       When BRIDGE_RNA_SMOKE is off, EPOCHS / TRAIN_SUBSET / VAL_SUBSET / BATCH_SIZE still apply if set.
     """
     data_dir = os.environ.get("BRIDGE_RNA_DATA_DIR")
@@ -792,6 +809,11 @@ def _apply_runtime_env_config():
             CONFIG["val_subset"] = int(os.environ["BRIDGE_RNA_VAL_SUBSET"])
         if os.environ.get("BRIDGE_RNA_BATCH_SIZE"):
             CONFIG["batch_size"] = int(os.environ["BRIDGE_RNA_BATCH_SIZE"])
+
+    if os.environ.get("BRIDGE_RNA_LOSS"):
+        CONFIG["loss"] = os.environ["BRIDGE_RNA_LOSS"].strip().lower()
+    if os.environ.get("BRIDGE_RNA_HUBER_BETA"):
+        CONFIG["huber_beta"] = float(os.environ["BRIDGE_RNA_HUBER_BETA"])
 
 
 # ============================================================
@@ -1108,12 +1130,15 @@ def main():
 
             pred = model(x_masked)  # [B, G]
 
-            # MSE loss on masked positions only
+            # Regression loss on masked positions only (MSE or SmoothL1 / Huber)
             loss_parts = []
+            hb = float(CONFIG.get('huber_beta', 1.0))
             for i in range(len(x_masked)):
                 idxs = mask_idx[i]
                 if len(idxs) > 0:
-                    loss_parts.append(F.mse_loss(pred[i, idxs], x_true[i, idxs]))
+                    loss_parts.append(
+                        _masked_gene_loss(pred[i], x_true[i], idxs, CONFIG.get('loss', 'mse'), hb)
+                    )
 
             loss = torch.stack(loss_parts).mean() if loss_parts else torch.tensor(0.0, device=device)
 
@@ -1136,7 +1161,9 @@ def main():
         # --- Validate ---
         model.eval()
         val_loss = 0.0
+        val_mse_sum = 0.0  # always MSE for apples-to-apples across loss types
         val_batches = 0
+        hb = float(CONFIG.get('huber_beta', 1.0))
 
         with torch.no_grad():
             for x_masked, x_true, mask_idx in val_loader:
@@ -1145,21 +1172,29 @@ def main():
                 pred = model(x_masked)
 
                 loss_parts = []
+                mse_parts = []
                 for i in range(len(x_masked)):
                     idxs = mask_idx[i]
                     if len(idxs) > 0:
-                        loss_parts.append(F.mse_loss(pred[i, idxs], x_true[i, idxs]))
+                        loss_parts.append(
+                            _masked_gene_loss(pred[i], x_true[i], idxs, CONFIG.get('loss', 'mse'), hb)
+                        )
+                        mse_parts.append(F.mse_loss(pred[i, idxs], x_true[i, idxs]))
 
                 if loss_parts:
                     val_loss += torch.stack(loss_parts).mean().item()
+                    val_mse_sum += torch.stack(mse_parts).mean().item()
                     val_batches += 1
 
         # Sync validation across ranks
         vl = torch.tensor(val_loss, device=device)
+        vm = torch.tensor(val_mse_sum, device=device)
         vb = torch.tensor(float(val_batches), device=device)
         dist.all_reduce(vl, op=dist.ReduceOp.SUM)
+        dist.all_reduce(vm, op=dist.ReduceOp.SUM)
         dist.all_reduce(vb, op=dist.ReduceOp.SUM)
         epoch_val_loss = (vl / vb.clamp(min=1)).item()
+        epoch_val_mse = (vm / vb.clamp(min=1)).item()
 
         train_losses.append(epoch_train_loss)
         val_losses.append(epoch_val_loss)
@@ -1167,12 +1202,14 @@ def main():
 
         # Log to wandb
         if is_main and HAS_WANDB:
-            wandb.log({
+            log_dict = {
                 'epoch': epoch + 1,
                 'train_loss': epoch_train_loss,
                 'val_loss': epoch_val_loss,
+                'val_mse': epoch_val_mse,
                 'lr': scheduler.get_last_lr()[0],
-            })
+            }
+            wandb.log(log_dict)
 
         epoch_time = time.time() - epoch_start
 
@@ -1183,7 +1220,8 @@ def main():
             print(f"\n  ╔════════════════════════════════════════════╗")
             print(f"  ║ Epoch {epoch+1}/{CONFIG['epochs']}")
             print(f"  ║ Train Loss: {epoch_train_loss:.6f}")
-            print(f"  ║ Val Loss:   {epoch_val_loss:.6f}")
+            print(f"  ║ Val Loss:   {epoch_val_loss:.6f}  ({CONFIG.get('loss', 'mse')})")
+            print(f"  ║ Val MSE:    {epoch_val_mse:.6f}  (for comparing runs)")
             print(f"  ║ Time: {epoch_time:.1f}s")
 
             checkpoint_payload = {
@@ -1268,7 +1306,7 @@ def main():
             plt.plot(train_losses, marker='o', label='Train Loss', linewidth=2)
             plt.plot(val_losses, marker='s', label='Val Loss', linewidth=2)
             plt.xlabel("Epoch")
-            plt.ylabel("MSE Loss")
+            plt.ylabel(f"Loss ({CONFIG.get('loss', 'mse')})")
             plt.title("ExpressionPerformer Training")
             plt.legend()
             plt.grid(True, alpha=0.3)
