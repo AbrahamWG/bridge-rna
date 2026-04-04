@@ -21,7 +21,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-# Memory on GPU partitions scales with cores; omit --mem unless you need more (request extra cores).
+# Explicit mem helps some GPU partitions schedule consistently (matches savio2_1080ti smoke script).
+#SBATCH --mem=32G
 #SBATCH --time=00:05:00
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
@@ -60,6 +61,22 @@ module load anaconda3/2024.10-1-11.4
 eval "$(conda shell.bash hook)"
 conda activate bridge-rna
 
+# Quick GPU visibility check (verification: expect 1 GPU + cuda True in logs)
+echo "=== GPU sanity (savio3 smoke) ==="
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi -L || echo "WARN: nvidia-smi -L failed"
+else
+  echo "WARN: nvidia-smi not in PATH"
+fi
+python - <<'PY'
+import torch
+print("torch.cuda.is_available():", torch.cuda.is_available())
+if torch.cuda.is_available():
+    print("torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0))
+    print("torch.cuda.device_count():", torch.cuda.device_count())
+PY
+echo "=== end GPU sanity ==="
+
 # Default smoke data: symlink dir with only processed_mouse_*.parquet (see setup_smoke_data_symlinks.sh)
 export BRIDGE_RNA_DATA_DIR="${BRIDGE_RNA_DATA_DIR:-/global/scratch/users/abrahamguan/bridge-rna-smoke-data}"
 if [[ ! -d "$BRIDGE_RNA_DATA_DIR" ]]; then
@@ -81,7 +98,7 @@ export BRIDGE_RNA_CHECKPOINT_DIR="${SLURM_SUBMIT_DIR}/checkpoints_smoke_${SLURM_
 
 # W&B: default project keeps your runs separate from ad-hoc local runs
 export WANDB_PROJECT="${WANDB_PROJECT:-bridge-rna-smoke}"
-export WANDB_RUN_NAME="${WANDB_RUN_NAME:-smoke-${SLURM_JOB_ID}}"
+export WANDB_RUN_NAME="${WANDB_RUN_NAME:-smoke-savio3-${SLURM_JOB_ID}}"
 # export WANDB_ENTITY=your-wandb-username-or-team
 
 if [[ -z "${WANDB_API_KEY:-}" ]] && [[ ! -f "${HOME}/.netrc" ]]; then

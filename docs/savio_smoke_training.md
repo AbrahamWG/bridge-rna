@@ -74,6 +74,35 @@ The script sets `BRIDGE_RNA_DATA_DIR`, `BRIDGE_RNA_SMOKE`, checkpoint dir, and `
 
 **Alternative:** `scripts/savio_smoke_train.slurm` targets **savio3** GPUs (`savio3_gpu` / `savio_lowprio`). Use whichever matches your allocation and passes `sbatch` validation.
 
+### Verifying Savio3 (first-time or after past failures)
+
+Use this when you want to confirm **`savio3_gpu` + `savio_lowprio`** works for your account (CDSS `ic_cdss170` has had mixed results vs `savio2_1080ti`).
+
+1. **On the login node** (conda env as in [One-time setup](#one-time-setup)):
+
+   ```bash
+   cd /global/scratch/users/<USER>/bridge-rna
+   git pull   # pick up latest scripts
+   mkdir -p logs
+   sbatch scripts/savio_smoke_train.slurm
+   ```
+
+2. **Or** use the submit-and-report helper (override the default 1080 Ti script):
+
+   ```bash
+   SLURM_SCRIPT=scripts/savio_smoke_train.slurm bash scripts/savio_smoke_submit_and_report.sh
+   ```
+
+3. **Success criteria**
+   - `sacct` shows **`COMPLETED`** and **`ExitCode=0:0`** for the main job.
+   - `logs/slurm-<JOBID>.out` contains **`=== GPU sanity (savio3 smoke) ===`**, **`nvidia-smi -L`** listing at least one GPU, and **`torch.cuda.is_available(): True`**, then normal training/validation lines from `train.py`.
+
+4. **If `sbatch` rejects the job** (partition/QoS/GRES): check [Submitting jobs](https://docs-research-it.berkeley.edu/services/high-performance-computing/user-guide/running-your-jobs/submitting-jobs/) and your `sshare -U` / `sacctmgr` association. Your group may not have access to `savio3_gpu` or `savio_lowprio` — use `scripts/savio_smoke_train_savio2_1080ti.slurm` until IT or your PI adjusts the allocation.
+
+5. **If the job starts but CUDA is broken** (`torch.cuda.is_available(): False`, or `nvidia-smi` hangs): treat like [GPU nodes: hangs and excludes](#gpu-nodes-hangs-and-excludes) — note **NodeList** from `sacct`, try another run, and ask admins if a node is bad.
+
+W&B runs from this script default to **`WANDB_RUN_NAME=smoke-savio3-<JOBID>`** so they are easy to tell apart from 1080 Ti smoke jobs.
+
 ## Monitor jobs and logs
 
 ```bash
