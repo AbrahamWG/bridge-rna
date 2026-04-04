@@ -6,6 +6,8 @@
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
 #SBATCH --gres=gpu:1
+# Exclude node where nvidia-smi / PyTorch CUDA init failed (2026-04); remove if fixed by admins.
+#SBATCH --exclude=n0228.savio2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
