@@ -60,6 +60,13 @@ import pyarrow.parquet as pq
 from slim_performer_model import SLiMPerformerLayer
 
 
+def _parquet_stored_value_type(t):
+    """Unwrap dictionary-encoded columns to the stored value type."""
+    while pa.types.is_dictionary(t):
+        t = t.value_type
+    return t
+
+
 def _parquet_numeric_gene_columns(schema: pa.Schema) -> list:
     """
     Column names to use as gene expression: numeric types only.
@@ -67,15 +74,19 @@ def _parquet_numeric_gene_columns(schema: pa.Schema) -> list:
     Excludes geo_accession / pandas index and drops string (or other non-numeric)
     columns so mentor Parquet with differently named sample-ID columns cannot be
     mistaken for gene features.
+
+    Dictionary-encoded columns are unwrapped (common in Parquet); numeric value
+    types count as genes, string value types (e.g. sample IDs) are skipped.
     """
     excluded = {'geo_accession', '__index_level_0__'}
     out = []
-    for i in range(schema.num_fields):
+    # Use len(schema); older PyArrow Schema has no .num_fields attribute.
+    for i in range(len(schema)):
         field = schema.field(i)
         if field.name in excluded:
             continue
-        t = field.type
-        if pa.types.is_floating(t) or pa.types.is_integer(t):
+        t = _parquet_stored_value_type(field.type)
+        if pa.types.is_floating(t) or pa.types.is_integer(t) or pa.types.is_decimal(t):
             out.append(field.name)
     return out
 
