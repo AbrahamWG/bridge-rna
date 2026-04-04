@@ -116,6 +116,45 @@ Slurm **node names** must be fully qualified (e.g. `n0228.savio2`), not short na
 
 See `train.py` (`_apply_runtime_env_config`) for overrides such as `BRIDGE_RNA_TRAIN_SUBSET`, `BRIDGE_RNA_EPOCHS`, etc.
 
+## Automating the debug loop (submit → wait → logs)
+
+Manual cycle (`sbatch`, `tail -f`, `sacct`, open `.err`) gets old fast. Options:
+
+1. **Wrapper script (repo)** — run once from the login node; it submits smoke training, waits until the job leaves the queue, then prints **`sacct`** plus the last lines of **`.out`** and **`.err`**:
+
+   ```bash
+   cd /global/scratch/users/<USER>/bridge-rna
+   bash scripts/savio_smoke_submit_and_report.sh
+   ```
+
+   Wait for an already-submitted job only:
+
+   ```bash
+   bash scripts/savio_smoke_submit_and_report.sh 33196453
+   ```
+
+   Override which Slurm file to submit: `SLURM_SCRIPT=scripts/savio_smoke_train.slurm bash scripts/savio_smoke_submit_and_report.sh`
+
+2. **Slurm email** — add to the smoke `.slurm` file (optional):
+
+   ```bash
+   #SBATCH --mail-type=END,FAIL
+   #SBATCH --mail-user=you@berkeley.edu
+   ```
+
+   You get mail when the job ends instead of polling.
+
+3. **Catch errors before Savio** — quick local checks after editing Python (on your laptop or login node):
+
+   ```bash
+   python -m py_compile train.py
+   python -c "import train"   # import-time errors only
+   ```
+
+   Full training still needs a GPU, but syntax/import bugs fail in seconds.
+
+4. **W&B** — keep using the project UI for metrics; the wrapper script is for **exit codes and tracebacks** in one place.
+
 ## Official Savio docs
 
 - [Submitting jobs](https://docs-research-it.berkeley.edu/services/high-performance-computing/user-guide/running-your-jobs/submitting-jobs/)
