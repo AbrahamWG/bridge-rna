@@ -50,6 +50,16 @@ bash scripts/setup_smoke_data_symlinks.sh
 export BRIDGE_RNA_DATA_DIR=/global/scratch/users/<USER>/bridge-rna-smoke-data
 ```
 
+## Longer run while away (optional “dinner” job)
+
+After smoke passes, you can submit a **multi-epoch** job that still uses the same scratch data dir but **does not** use smoke mode (`BRIDGE_RNA_SMOKE=0`). See `scripts/savio_dev_train_savio2_1080ti.slurm` (default **5 epochs**, **2000 / 400** train/val, **3 h** wall clock). Requires a current `train.py` that honors `BRIDGE_RNA_EPOCHS` / subsets when smoke is off.
+
+```bash
+sbatch scripts/savio_dev_train_savio2_1080ti.slurm
+```
+
+Or shorten from the login node before submit: `export BRIDGE_RNA_EPOCHS=3` then `sbatch ...`.
+
 ## Submit the smoke job (savio2 1080 Ti, CDSS-friendly)
 
 For accounts that work with **`ic_cdss170`** + **`savio2_1080ti`** + **`savio_normal`**, use:

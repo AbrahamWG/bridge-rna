@@ -29,8 +29,14 @@ else
   echo "Submitted batch job ${JOB_ID}"
 fi
 
-echo "Polling until job ${JOB_ID} leaves squeue..."
-while squeue -j "${JOB_ID}" -h 2>/dev/null | grep -q .; do
+echo "Waiting for job ${JOB_ID} to finish (typically 1–5+ minutes; not stuck)."
+echo "Other terminal: tail -f logs/slurm-${JOB_ID}.out"
+while true; do
+  if ! squeue -j "${JOB_ID}" -h 2>/dev/null | grep -q .; then
+    break
+  fi
+  line="$(squeue -j "${JOB_ID}" -h -o '%.10i %8T %10M %R' 2>/dev/null | head -1)"
+  echo "  $(date '+%H:%M:%S')  ${line:-(running)}"
   sleep 8
 done
 # Brief pause so Slurm flushes log files

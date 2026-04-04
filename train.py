@@ -761,6 +761,7 @@ def _apply_runtime_env_config():
       BRIDGE_RNA_TRAIN_SUBSET, BRIDGE_RNA_VAL_SUBSET, BRIDGE_RNA_EPOCHS, BRIDGE_RNA_BATCH_SIZE
       BRIDGE_RNA_DATA_MODE     — default streaming under smoke
       BRIDGE_RNA_HIDDEN_DIM    — smaller model for smoke (default 128)
+      When BRIDGE_RNA_SMOKE is off, EPOCHS / TRAIN_SUBSET / VAL_SUBSET / BATCH_SIZE still apply if set.
     """
     data_dir = os.environ.get("BRIDGE_RNA_DATA_DIR")
     if data_dir:
@@ -781,6 +782,16 @@ def _apply_runtime_env_config():
         hd = int(os.environ.get("BRIDGE_RNA_HIDDEN_DIM", "128"))
         CONFIG["hidden_dim"] = hd
         CONFIG["ffn_dim"] = hd * 4
+    else:
+        # Non-smoke: optional cluster overrides (same env names as smoke where sensible).
+        if os.environ.get("BRIDGE_RNA_EPOCHS"):
+            CONFIG["epochs"] = int(os.environ["BRIDGE_RNA_EPOCHS"])
+        if os.environ.get("BRIDGE_RNA_TRAIN_SUBSET"):
+            CONFIG["train_subset"] = int(os.environ["BRIDGE_RNA_TRAIN_SUBSET"])
+        if os.environ.get("BRIDGE_RNA_VAL_SUBSET"):
+            CONFIG["val_subset"] = int(os.environ["BRIDGE_RNA_VAL_SUBSET"])
+        if os.environ.get("BRIDGE_RNA_BATCH_SIZE"):
+            CONFIG["batch_size"] = int(os.environ["BRIDGE_RNA_BATCH_SIZE"])
 
 
 # ============================================================
