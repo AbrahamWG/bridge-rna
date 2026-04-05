@@ -1,0 +1,15 @@
+# Requires Python 3.12+ (do not use /usr/bin/python3 on Savio — it is 3.6).
+#
+# PyTorch: install the latest CUDA build for your GPU stack first, then this file.
+#   pip install --upgrade pip
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# (Pick cu121/cu124/cpu from https://pytorch.org/get-started/locally/ — match Savio’s CUDA.)
+#
+# Then install latest compatible versions of everything else:
+#   pip install --upgrade -r requirements.txt
+
+numpy
+pandas
+pyarrow
+matplotlib
+wandb

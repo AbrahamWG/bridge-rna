@@ -21,12 +21,14 @@
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
-#SBATCH --gres=gpu:1
+# One node, 4× 1080 Ti (match torchrun --nproc_per_node=4 below).
+# For single-GPU again: set --gres=gpu:1, cpus-per-task≈4, mem≈32G, and nproc_per_node=1.
+#SBATCH --gres=gpu:4
 #SBATCH --exclude=n0228.savio2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
 # Full-dataset epochs are much slower than 2k-subset runs; increase if jobs hit TIMEOUT.
 #SBATCH --time=24:00:00
 #SBATCH --output=logs/slurm-%j.out
@@ -69,6 +71,7 @@ echo "BRIDGE_RNA_LOSS=${BRIDGE_RNA_LOSS} BRIDGE_RNA_HUBER_BETA=${BRIDGE_RNA_HUBE
 echo "BRIDGE_RNA_DATA_DIR=${BRIDGE_RNA_DATA_DIR}"
 echo "WANDB_PROJECT=${WANDB_PROJECT} WANDB_DIR=${WANDB_DIR}"
 
-torchrun --standalone --nproc_per_node=1 train.py
+echo "DDP: 4 processes (one per GPU)"
+torchrun --standalone --nproc_per_node=4 train.py
 
 echo "Done dev job ${SLURM_JOB_ID}"

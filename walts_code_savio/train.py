@@ -1131,10 +1131,6 @@ def main():
     else:
         global_best_val_loss = float('inf')
 
-    # Previous epoch validation metrics (for log context on train progress lines)
-    prev_val_loss = None
-    prev_val_mse = None
-
     run_metadata = {
         'run_id': run_id,
         'timestamp': run_timestamp,
@@ -1204,27 +1200,12 @@ def main():
             running_loss += loss.item()
             num_batches += 1
 
-            # Progress every 25% (with ETA for remaining batches in this epoch)
+            # Progress every 25%
             if is_main and (batch_idx + 1) % max(1, len(train_loader) // 4) == 0:
                 avg = running_loss / num_batches
-                done = batch_idx + 1
-                total_b = len(train_loader)
-                elapsed = time.time() - epoch_start
-                if done > 0 and elapsed > 0:
-                    sec_per_batch = elapsed / done
-                    eta_epoch_sec = sec_per_batch * (total_b - done)
-                    eta_str = f" | ETA this epoch: {eta_epoch_sec / 60.0:.1f}m"
-                else:
-                    eta_str = ""
-                prev_str = ""
-                if prev_val_loss is not None:
-                    prev_str = (
-                        f" | prev_epoch val_loss: {prev_val_loss:.6f} "
-                        f"val_mse: {prev_val_mse:.6f}"
-                    )
                 print(f"  Epoch {epoch+1}/{CONFIG['epochs']} | "
-                      f"Batch {done}/{total_b} | "
-                      f"Loss: {loss.item():.6f} | Avg: {avg:.6f}{eta_str}{prev_str}")
+                      f"Batch {batch_idx+1}/{len(train_loader)} | "
+                      f"Loss: {loss.item():.6f} | Avg: {avg:.6f}")
 
         epoch_train_loss = running_loss / max(1, num_batches)
 
@@ -1235,9 +1216,8 @@ def main():
         val_batches = 0
         hb = float(CONFIG.get('huber_beta', 1.0))
 
-        n_val_batches = len(val_loader)
         with torch.no_grad():
-            for vbi, (x_masked, x_true, mask_idx) in enumerate(val_loader):
+            for x_masked, x_true, mask_idx in val_loader:
                 x_masked = x_masked.to(device)
                 x_true = x_true.to(device)
                 pred = model(x_masked)
@@ -1256,22 +1236,6 @@ def main():
                     val_loss += torch.stack(loss_parts).mean().item()
                     val_mse_sum += torch.stack(mse_parts).mean().item()
                     val_batches += 1
-
-                # Running val metrics here are only meaningful on single-GPU (full val set on one rank).
-                if (
-                    is_main
-                    and world_size == 1
-                    and n_val_batches > 0
-                    and (vbi + 1) % max(1, n_val_batches // 4) == 0
-                ):
-                    rv = val_loss / max(1, val_batches)
-                    rm = val_mse_sum / max(1, val_batches)
-                    print(
-                        f"  [VAL] Epoch {epoch+1}/{CONFIG['epochs']} | "
-                        f"batch {vbi+1}/{n_val_batches} | "
-                        f"run val_loss: {rv:.6f} | run val_mse: {rm:.6f}",
-                        flush=True,
-                    )
 
         # Sync validation across ranks
         vl = torch.tensor(val_loss, device=device)
@@ -1309,19 +1273,7 @@ def main():
             print(f"  ║ Train Loss: {epoch_train_loss:.6f}")
             print(f"  ║ Val Loss:   {epoch_val_loss:.6f}  ({CONFIG.get('loss', 'mse')})")
             print(f"  ║ Val MSE:    {epoch_val_mse:.6f}  (for comparing runs)")
-            if prev_val_loss is not None:
-                print(
-                    f"  ║ Δ vs prev:  val_loss {epoch_val_loss - prev_val_loss:+.6f}  "
-                    f"val_mse {epoch_val_mse - prev_val_mse:+.6f}",
-                )
             print(f"  ║ Time: {epoch_time:.1f}s")
-            rem_ep = CONFIG["epochs"] - (epoch + 1)
-            if rem_ep > 0:
-                eta_h = (epoch_time * rem_ep) / 3600.0
-                print(f"  ║ ~ETA remaining (~{rem_ep} epoch(s)): {eta_h:.2f}h  (rough; assumes similar length)")
-
-            prev_val_loss = epoch_val_loss
-            prev_val_mse = epoch_val_mse
 
             checkpoint_payload = {
                 'model_state_dict': model_sd,

@@ -52,7 +52,7 @@ export BRIDGE_RNA_DATA_DIR=/global/scratch/users/<USER>/bridge-rna-smoke-data
 
 ## Longer run while away (optional “dinner” job)
 
-After smoke passes, you can submit a **multi-epoch** job that still uses the same scratch data dir but **does not** use smoke mode (`BRIDGE_RNA_SMOKE=0`). See `scripts/savio_dev_train_savio2_1080ti.slurm` (default **5 epochs**, **`BRIDGE_RNA_USE_ALL_SAMPLES=1`** → **80/20 train/val on all samples** in the data dir, **24 h** wall clock). For fixed small subsets instead: `export BRIDGE_RNA_USE_ALL_SAMPLES=0` and set `BRIDGE_RNA_TRAIN_SUBSET` / `BRIDGE_RNA_VAL_SUBSET`.
+After smoke passes, you can submit a **multi-epoch** job that still uses the same scratch data dir but **does not** use smoke mode (`BRIDGE_RNA_SMOKE=0`). See `scripts/savio_dev_train_savio2_1080ti.slurm` (default **4 GPUs** + `torchrun --nproc_per_node=4`, **5 epochs**, **`BRIDGE_RNA_USE_ALL_SAMPLES=1`** → **80/20 train/val on all samples** in the data dir, **24 h** wall clock). Edit the Slurm file if you need **1 GPU** (`--gres=gpu:1`, `nproc_per_node=1`, lower CPUs/RAM). For fixed small subsets instead: `export BRIDGE_RNA_USE_ALL_SAMPLES=0` and set `BRIDGE_RNA_TRAIN_SUBSET` / `BRIDGE_RNA_VAL_SUBSET`.
 
 ```bash
 sbatch scripts/savio_dev_train_savio2_1080ti.slurm
