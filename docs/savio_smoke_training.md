@@ -52,7 +52,7 @@ export BRIDGE_RNA_DATA_DIR=/global/scratch/users/<USER>/bridge-rna-smoke-data
 
 ## Longer run while away (optional “dinner” job)
 
-After smoke passes, you can submit a **multi-epoch** job that still uses the same scratch data dir but **does not** use smoke mode (`BRIDGE_RNA_SMOKE=0`). See `scripts/savio_dev_train_savio2_1080ti.slurm` (default **4 GPUs** + `torchrun --nproc_per_node=4`, **5 epochs**, **`BRIDGE_RNA_USE_ALL_SAMPLES=1`** → **80/20 train/val on all samples** in the data dir, **24 h** wall clock). Edit the Slurm file if you need **1 GPU** (`--gres=gpu:1`, `nproc_per_node=1`, lower CPUs/RAM). For fixed small subsets instead: `export BRIDGE_RNA_USE_ALL_SAMPLES=0` and set `BRIDGE_RNA_TRAIN_SUBSET` / `BRIDGE_RNA_VAL_SUBSET`.
+After smoke passes, you can submit a **multi-epoch** job that still uses the same scratch data dir but **does not** use smoke mode (`BRIDGE_RNA_SMOKE=0`). See `scripts/savio_dev_train_savio2_1080ti.slurm`: default **1 GPU**, **`torchrun --nproc_per_node=1`**, **5 epochs**, fixed **20k / 4k** train/val and **batch 16** (override with `BRIDGE_RNA_USE_ALL_SAMPLES=1` for **80/20 on all samples**), **24 h** wall clock. The file comments describe how to switch back to **4× GPU** DDP if needed.
 
 ```bash
 sbatch scripts/savio_dev_train_savio2_1080ti.slurm
@@ -76,16 +76,39 @@ If **`sbatch`** fails with *Invalid account or account/partition combination*, t
 
 ## Monitor jobs and logs
 
+**Submit and capture the job id in one shell** (then tail / `sacct` use the same variable):
+
 ```bash
-squeue -u <YOUR_USERNAME>
-sacct -j <JOBID> --format=JobID,NodeList,State,Elapsed,ExitCode
-tail -f logs/slurm-<JOBID>.out
-tail -80 logs/slurm-<JOBID>.err
+cd /global/scratch/users/<USER>/bridge-rna
+mkdir -p logs
+
+# Prefer --parsable (numeric id only). If sbatch errors on --parsable, use the fallback line instead.
+JOBID=$(sbatch --parsable scripts/savio_smoke_train_savio2_1080ti.slurm)
+# JOBID=$(sbatch scripts/savio_smoke_train_savio2_1080ti.slurm | awk '{print $NF}')
+
+echo "JOBID=${JOBID}"
+squeue -u "$USER"
+tail -f "logs/slurm-${JOBID}.out"
+```
+
+Use `scripts/savio_dev_train_savio2_1080ti.slurm` instead of the smoke script if that is what you submitted—the **`JOBID` → `logs/slurm-${JOBID}.out`** pattern is the same.
+
+In another terminal (same `JOBID`):
+
+```bash
+tail -80 "logs/slurm-${JOBID}.err"
+sacct -j "${JOBID}" --format=JobID,NodeList,State,Elapsed,ExitCode
+```
+
+After the job finishes, `tail` exits when the file stops growing; use `sacct` for final state:
+
+```bash
+sacct -j "${JOBID}" --format=JobID,NodeList,State,Elapsed,ExitCode,End
 ```
 
 Success: **`State=COMPLETED`**, **`ExitCode=0:0`**, and training/validation loss lines in `.out`.
 
-Cancel: `scancel <JOBID>`.
+Cancel: `scancel "${JOBID}"`.
 
 ## GPU nodes: hangs and excludes
 
