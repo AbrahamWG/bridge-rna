@@ -9,7 +9,7 @@
 #   export BRIDGE_RNA_EPOCHS=3
 #   sbatch --export=ALL scripts/savio_dev_train_savio2_1080ti.slurm
 #
-# Default: 1 GPU + torchrun nproc=1 — matches mentor-style logs (20k train / 4k val, batch 16 → 1250/250 batches).
+# Default: 1 GPU + torchrun nproc=1 — 20k/4k subsets; batch 8 fits ~11 GiB 1080 Ti (batch 16 OOM’d). Override BRIDGE_RNA_BATCH_SIZE if needed.
 # Multi-GPU 4× previously hit "invalid device ordinal" on cuda:3 on some nodes (e.g. n0302); use 1 GPU for apples-to-apples.
 # Full dataset: BRIDGE_RNA_USE_ALL_SAMPLES=1. Re-enable 4× DDP: edit #SBATCH --gres, cpus, mem, and torchrun line below.
 #
@@ -63,7 +63,7 @@ export BRIDGE_RNA_EPOCHS="${BRIDGE_RNA_EPOCHS:-5}"
 export BRIDGE_RNA_USE_ALL_SAMPLES="${BRIDGE_RNA_USE_ALL_SAMPLES:-0}"
 export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-20000}"
 export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-4000}"
-export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-16}"
+export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-8}"
 export BRIDGE_RNA_LOSS="${BRIDGE_RNA_LOSS:-mse}"
 export BRIDGE_RNA_HUBER_BETA="${BRIDGE_RNA_HUBER_BETA:-1.0}"
 # Mentor comparison run used lr=2e-4 (train.py CONFIG default is 1e-4).
@@ -79,7 +79,10 @@ echo "BRIDGE_RNA_LEARNING_RATE=${BRIDGE_RNA_LEARNING_RATE}"
 echo "BRIDGE_RNA_DATA_DIR=${BRIDGE_RNA_DATA_DIR}"
 echo "WANDB_PROJECT=${WANDB_PROJECT} WANDB_DIR=${WANDB_DIR}"
 
-echo "torchrun: 1 process (single GPU; logs match 20k/1250 batch lines)"
+# Reduce fragmentation OOMs on tight GPUs (PyTorch 2.x+).
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+
+echo "torchrun: 1 process (single GPU; ~ceil(20k/batch) train steps per epoch)"
 torchrun --standalone --nproc_per_node=1 train.py
 
 echo "Done dev job ${SLURM_JOB_ID}"
