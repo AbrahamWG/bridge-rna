@@ -23,11 +23,14 @@
 #SBATCH --qos=savio_normal
 # One node, 4× 1080 Ti (match torchrun --nproc_per_node=4 below).
 # For single-GPU again: set --gres=gpu:1, cpus-per-task≈4, mem≈32G, and nproc_per_node=1.
+#
+# savio2_1080ti nodes have 8 CPU cores and 64 GB RAM total per node (4× GPU per node).
+# Do NOT set cpus-per-task above 8 or sbatch fails: "CPU count per node can not be satisfied".
 #SBATCH --gres=gpu:4
 #SBATCH --exclude=n0228.savio2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 # Full-dataset epochs are much slower than 2k-subset runs; increase if jobs hit TIMEOUT.
 #SBATCH --time=24:00:00
