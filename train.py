@@ -44,6 +44,7 @@ import json
 from pathlib import Path
 from collections import OrderedDict
 import bisect
+import contextlib
 
 import numpy as np
 import torch
@@ -58,6 +59,21 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from slim_performer_model import SLiMPerformerLayer
+
+try:
+    from torch.distributed.algorithms.join import Join as _DDPJoin
+except ImportError:
+    _DDPJoin = None
+
+
+def _ddp_join_ctx(model, world_size):
+    """
+    DDP uneven inputs: streaming assigns disjoint Parquet files per rank, so batch
+    counts can differ. Without Join, ranks desync and torchrun reports worker exit 1.
+    """
+    if world_size <= 1 or _DDPJoin is None:
+        return contextlib.nullcontext()
+    return _DDPJoin([model], enable=True)
 
 
 def _masked_gene_loss(pred_i, true_i, idxs, loss_name, huber_beta=1.0):
@@ -141,7 +157,7 @@ CONFIG = {
     # Data loading mode: 'preload' (load arrays into RAM) or 'streaming' (on-the-fly parquet reads)
     'data_mode': 'streaming',
     'stream_cache_size': 2,
-    'num_workers': 1,
+    'num_workers': 0,
     'prefetch_factor': 2,
     'persistent_workers': False,
     # Data subset sizes (set to None for all available)
@@ -873,7 +889,6 @@ def _apply_runtime_env_config():
 def main():
     _apply_runtime_env_config()
 
-    print("\n[STARTUP] train.py started - initializing DDP...", flush=True)
     script_start = time.time()
 
     # Initialize DDP
@@ -886,6 +901,7 @@ def main():
     is_main = rank == 0
 
     if is_main:
+        print("\n[STARTUP] train.py started — DDP initialized.", flush=True)
         print("\n" + "=" * 70)
         print(f"ExpressionPerformer Training — DDP ({world_size} processes)")
         print("=" * 70)
@@ -895,6 +911,7 @@ def main():
     # WANDB (init early so sweep can override CONFIG)
     # ─────────────────────────────────────────────────────────
     if is_main and HAS_WANDB:
+        print("[W&B] Initializing (can take 1–5+ min on Savio if the network is slow)...", flush=True)
         _wandb_entity = os.environ.get("WANDB_ENTITY")
         wandb.init(
             project=os.environ.get("WANDB_PROJECT", "expression-performer"),
@@ -947,6 +964,9 @@ def main():
     val_indices = val_indices_list[0]
     if is_main:
         print(f"  ✓ Index time: {time.time()-t0:.1f}s", flush=True)
+        if world_size > 1:
+            print(f"\n[DATA] Train: {len(train_indices):,} samples (global)", flush=True)
+            print(f"[DATA] Val:   {len(val_indices):,} samples (global)", flush=True)
 
     data_mode = CONFIG.get('data_mode', 'preload')
     if data_mode == 'streaming':
@@ -995,7 +1015,7 @@ def main():
         val_ds = ExpressionMLMDataset(X_val, CONFIG['mask_ratio'], CONFIG['mask_token'])
 
     if is_main:
-        print(f"\n[CHECK] num_genes={num_genes}")
+        print(f"\n[CHECK] num_genes={num_genes}", flush=True)
         assert num_genes > 10000, f"Expected ~16K genes, got {num_genes}"
 
     # ─────────────────────────────────────────────────────────
@@ -1023,9 +1043,17 @@ def main():
                                           rank=rank, shuffle=False, seed=42)
 
     num_workers = int(CONFIG.get('num_workers', 0))
+    if data_mode == 'streaming' and is_main:
+        print(
+            "[DATA] Single-parquet streaming strongly prefers num_workers=0 for memory safety.",
+            flush=True,
+        )
     if data_mode == 'streaming' and num_workers > 0:
         if is_main:
-            print("[DATA] Streaming mode forcing num_workers=0 to avoid per-worker row-group cache OOM.", flush=True)
+            print(
+                "[DATA] Streaming mode overriding num_workers>0 → 0 (avoids per-worker row-group cache OOM).",
+                flush=True,
+            )
         num_workers = 0
 
     loader_kwargs = {
@@ -1056,8 +1084,29 @@ def main():
                                 sampler=val_sampler, **loader_kwargs)
 
     if is_main:
-        print(f"\n[DATA] Train: {len(train_ds):,} samples, {len(train_loader)} batches")
-        print(f"[DATA] Val:   {len(val_ds):,} samples, {len(val_loader)} batches")
+        if world_size > 1:
+            print(
+                f"\n[DATA] Train (rank {rank}): {len(train_ds):,} samples, {len(train_loader)} batches",
+                flush=True,
+            )
+            print(
+                f"[DATA] Val (rank {rank}):   {len(val_ds):,} samples, {len(val_loader)} batches",
+                flush=True,
+            )
+        else:
+            print(
+                f"\n[DATA] Train: {len(train_ds):,} samples, {len(train_loader)} batches",
+                flush=True,
+            )
+            print(
+                f"[DATA] Val:   {len(val_ds):,} samples, {len(val_loader)} batches",
+                flush=True,
+            )
+        prep_to_loaders = time.time() - script_start
+        print(
+            f"[PREP] Data loaders ready (elapsed since process start: {prep_to_loaders:.1f}s)",
+            flush=True,
+        )
 
     # Synchronize after data loading
     dist.barrier()
@@ -1104,6 +1153,10 @@ def main():
     if is_main:
         print("\n" + "=" * 70, flush=True)
         print("[TRAIN] Starting training...", flush=True)
+        print(
+            f"[PREP] Entering train loop (setup since start: {time.time() - script_start:.1f}s)",
+            flush=True,
+        )
         print("=" * 70 + "\n", flush=True)
 
     best_val_loss = float('inf')
@@ -1179,52 +1232,71 @@ def main():
         running_loss = 0.0
         num_batches = 0
 
-        for batch_idx, (x_masked, x_true, mask_idx) in enumerate(train_loader):
-            x_masked = x_masked.to(device)
-            x_true = x_true.to(device)
+        with _ddp_join_ctx(model, world_size):
+            for batch_idx, (x_masked, x_true, mask_idx) in enumerate(train_loader):
+                x_masked = x_masked.to(device)
+                x_true = x_true.to(device)
 
-            pred = model(x_masked)  # [B, G]
+                pred = model(x_masked)  # [B, G]
 
-            # Regression loss on masked positions only (MSE or SmoothL1 / Huber)
-            loss_parts = []
-            hb = float(CONFIG.get('huber_beta', 1.0))
-            for i in range(len(x_masked)):
-                idxs = mask_idx[i]
-                if len(idxs) > 0:
-                    loss_parts.append(
-                        _masked_gene_loss(pred[i], x_true[i], idxs, CONFIG.get('loss', 'mse'), hb)
+                # Regression loss on masked positions only (MSE or SmoothL1 / Huber)
+                loss_parts = []
+                hb = float(CONFIG.get('huber_beta', 1.0))
+                for i in range(len(x_masked)):
+                    idxs = mask_idx[i]
+                    if len(idxs) > 0:
+                        loss_parts.append(
+                            _masked_gene_loss(pred[i], x_true[i], idxs, CONFIG.get('loss', 'mse'), hb)
+                        )
+
+                loss = torch.stack(loss_parts).mean() if loss_parts else torch.tensor(0.0, device=device)
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                running_loss += loss.item()
+                num_batches += 1
+
+                # Early ETA (first batch is often dominated by compile/caches; still useful in logs)
+                if is_main and batch_idx == 0:
+                    done = 1
+                    total_b = len(train_loader)
+                    elapsed = time.time() - epoch_start
+                    if total_b > 1 and elapsed > 0:
+                        eta_epoch_sec = (elapsed / done) * (total_b - done)
+                        print(
+                            f"  Epoch {epoch+1}/{CONFIG['epochs']} | "
+                            f"Batch 1/{total_b} (first batch) | "
+                            f"Loss: {loss.item():.6f} | "
+                            f"~ETA this epoch (naive): {eta_epoch_sec / 60.0:.1f}m",
+                            flush=True,
+                        )
+
+                # Progress every 25% (with ETA for remaining batches in this epoch)
+                if is_main and (batch_idx + 1) % max(1, len(train_loader) // 4) == 0:
+                    avg = running_loss / num_batches
+                    done = batch_idx + 1
+                    total_b = len(train_loader)
+                    elapsed = time.time() - epoch_start
+                    if done > 0 and elapsed > 0:
+                        sec_per_batch = elapsed / done
+                        eta_epoch_sec = sec_per_batch * (total_b - done)
+                        eta_str = f" | ETA this epoch: {eta_epoch_sec / 60.0:.1f}m"
+                    else:
+                        eta_str = ""
+                    prev_str = ""
+                    if prev_val_loss is not None:
+                        prev_str = (
+                            f" | prev_epoch val_loss: {prev_val_loss:.6f} "
+                            f"val_mse: {prev_val_mse:.6f}"
+                        )
+                    print(
+                        f"  Epoch {epoch+1}/{CONFIG['epochs']} | "
+                        f"Batch {done}/{total_b} | "
+                        f"Loss: {loss.item():.6f} | Avg: {avg:.6f}{eta_str}{prev_str}",
+                        flush=True,
                     )
-
-            loss = torch.stack(loss_parts).mean() if loss_parts else torch.tensor(0.0, device=device)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-            num_batches += 1
-
-            # Progress every 25% (with ETA for remaining batches in this epoch)
-            if is_main and (batch_idx + 1) % max(1, len(train_loader) // 4) == 0:
-                avg = running_loss / num_batches
-                done = batch_idx + 1
-                total_b = len(train_loader)
-                elapsed = time.time() - epoch_start
-                if done > 0 and elapsed > 0:
-                    sec_per_batch = elapsed / done
-                    eta_epoch_sec = sec_per_batch * (total_b - done)
-                    eta_str = f" | ETA this epoch: {eta_epoch_sec / 60.0:.1f}m"
-                else:
-                    eta_str = ""
-                prev_str = ""
-                if prev_val_loss is not None:
-                    prev_str = (
-                        f" | prev_epoch val_loss: {prev_val_loss:.6f} "
-                        f"val_mse: {prev_val_mse:.6f}"
-                    )
-                print(f"  Epoch {epoch+1}/{CONFIG['epochs']} | "
-                      f"Batch {done}/{total_b} | "
-                      f"Loss: {loss.item():.6f} | Avg: {avg:.6f}{eta_str}{prev_str}")
 
         epoch_train_loss = running_loss / max(1, num_batches)
 
@@ -1237,41 +1309,42 @@ def main():
 
         n_val_batches = len(val_loader)
         with torch.no_grad():
-            for vbi, (x_masked, x_true, mask_idx) in enumerate(val_loader):
-                x_masked = x_masked.to(device)
-                x_true = x_true.to(device)
-                pred = model(x_masked)
+            with _ddp_join_ctx(model, world_size):
+                for vbi, (x_masked, x_true, mask_idx) in enumerate(val_loader):
+                    x_masked = x_masked.to(device)
+                    x_true = x_true.to(device)
+                    pred = model(x_masked)
 
-                loss_parts = []
-                mse_parts = []
-                for i in range(len(x_masked)):
-                    idxs = mask_idx[i]
-                    if len(idxs) > 0:
-                        loss_parts.append(
-                            _masked_gene_loss(pred[i], x_true[i], idxs, CONFIG.get('loss', 'mse'), hb)
+                    loss_parts = []
+                    mse_parts = []
+                    for i in range(len(x_masked)):
+                        idxs = mask_idx[i]
+                        if len(idxs) > 0:
+                            loss_parts.append(
+                                _masked_gene_loss(pred[i], x_true[i], idxs, CONFIG.get('loss', 'mse'), hb)
+                            )
+                            mse_parts.append(F.mse_loss(pred[i, idxs], x_true[i, idxs]))
+
+                    if loss_parts:
+                        val_loss += torch.stack(loss_parts).mean().item()
+                        val_mse_sum += torch.stack(mse_parts).mean().item()
+                        val_batches += 1
+
+                    # Running val metrics here are only meaningful on single-GPU (full val set on one rank).
+                    if (
+                        is_main
+                        and world_size == 1
+                        and n_val_batches > 0
+                        and (vbi + 1) % max(1, n_val_batches // 4) == 0
+                    ):
+                        rv = val_loss / max(1, val_batches)
+                        rm = val_mse_sum / max(1, val_batches)
+                        print(
+                            f"  [VAL] Epoch {epoch+1}/{CONFIG['epochs']} | "
+                            f"batch {vbi+1}/{n_val_batches} | "
+                            f"run val_loss: {rv:.6f} | run val_mse: {rm:.6f}",
+                            flush=True,
                         )
-                        mse_parts.append(F.mse_loss(pred[i, idxs], x_true[i, idxs]))
-
-                if loss_parts:
-                    val_loss += torch.stack(loss_parts).mean().item()
-                    val_mse_sum += torch.stack(mse_parts).mean().item()
-                    val_batches += 1
-
-                # Running val metrics here are only meaningful on single-GPU (full val set on one rank).
-                if (
-                    is_main
-                    and world_size == 1
-                    and n_val_batches > 0
-                    and (vbi + 1) % max(1, n_val_batches // 4) == 0
-                ):
-                    rv = val_loss / max(1, val_batches)
-                    rm = val_mse_sum / max(1, val_batches)
-                    print(
-                        f"  [VAL] Epoch {epoch+1}/{CONFIG['epochs']} | "
-                        f"batch {vbi+1}/{n_val_batches} | "
-                        f"run val_loss: {rv:.6f} | run val_mse: {rm:.6f}",
-                        flush=True,
-                    )
 
         # Sync validation across ranks
         vl = torch.tensor(val_loss, device=device)

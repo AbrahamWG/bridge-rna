@@ -9,8 +9,9 @@
 #   export BRIDGE_RNA_EPOCHS=3
 #   sbatch --export=ALL scripts/savio_dev_train_savio2_1080ti.slurm
 #
-# Full data (all samples in BRIDGE_RNA_DATA_DIR, 80/20 train/val) is the default (USE_ALL_SAMPLES=1).
-# Fixed subsets instead: export BRIDGE_RNA_USE_ALL_SAMPLES=0 BRIDGE_RNA_TRAIN_SUBSET=2000 BRIDGE_RNA_VAL_SUBSET=400
+# Default: 1 GPU + torchrun nproc=1 — matches mentor-style logs (20k train / 4k val, batch 16 → 1250/250 batches).
+# Multi-GPU 4× previously hit "invalid device ordinal" on cuda:3 on some nodes (e.g. n0302); use 1 GPU for apples-to-apples.
+# Full dataset: BRIDGE_RNA_USE_ALL_SAMPLES=1. Re-enable 4× DDP: edit #SBATCH --gres, cpus, mem, and torchrun line below.
 #
 # Loss ablation (MSE vs Huber / SmoothL1), compare val_mse in W&B:
 #   export BRIDGE_RNA_LOSS=smooth_l1
@@ -21,12 +22,11 @@
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
-# One node, 4× 1080 Ti (match torchrun --nproc_per_node=4 below).
-# For single-GPU again: set --gres=gpu:1, cpus-per-task≈4, mem≈32G, and nproc_per_node=1.
+# 1× GPU (default): comparable to single-process mentor logs. For 4× GPU DDP: --gres=gpu:4, cpus-per-task=8, mem=64G, nproc_per_node=4.
 #
 # savio2_1080ti nodes have 8 CPU cores and 64 GB RAM total per node (4× GPU per node).
 # Do NOT set cpus-per-task above 8 or sbatch fails: "CPU count per node can not be satisfied".
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:1
 #SBATCH --exclude=n0228.savio2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -59,22 +59,27 @@ fi
 # Not smoke: uses full CONFIG defaults unless overridden below.
 export BRIDGE_RNA_SMOKE=0
 export BRIDGE_RNA_EPOCHS="${BRIDGE_RNA_EPOCHS:-5}"
-# 1 = use all samples (80/20 train/val). 0 = use BRIDGE_RNA_TRAIN_SUBSET / VAL (default 2000/400 from train.py CONFIG if unset).
-export BRIDGE_RNA_USE_ALL_SAMPLES="${BRIDGE_RNA_USE_ALL_SAMPLES:-1}"
-export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-4}"
+# 0 = fixed train/val counts (for comparable logs). 1 = all samples, 80/20 split.
+export BRIDGE_RNA_USE_ALL_SAMPLES="${BRIDGE_RNA_USE_ALL_SAMPLES:-0}"
+export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-20000}"
+export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-4000}"
+export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-16}"
 export BRIDGE_RNA_LOSS="${BRIDGE_RNA_LOSS:-mse}"
 export BRIDGE_RNA_HUBER_BETA="${BRIDGE_RNA_HUBER_BETA:-1.0}"
+# Mentor comparison run used lr=2e-4 (train.py CONFIG default is 1e-4).
+export BRIDGE_RNA_LEARNING_RATE="${BRIDGE_RNA_LEARNING_RATE:-2e-4}"
 
 export BRIDGE_RNA_CHECKPOINT_DIR="${SLURM_SUBMIT_DIR}/checkpoints_dev_${SLURM_JOB_ID}"
 export WANDB_PROJECT="${WANDB_PROJECT:-bridge-rna-smoke}"
 export WANDB_RUN_NAME="${WANDB_RUN_NAME:-dev-1080ti-${SLURM_JOB_ID}}"
 
-echo "BRIDGE_RNA_SMOKE=${BRIDGE_RNA_SMOKE} EPOCHS=${BRIDGE_RNA_EPOCHS} USE_ALL_SAMPLES=${BRIDGE_RNA_USE_ALL_SAMPLES} TRAIN_SUBSET=${BRIDGE_RNA_TRAIN_SUBSET:-} VAL_SUBSET=${BRIDGE_RNA_VAL_SUBSET:-} batch=${BRIDGE_RNA_BATCH_SIZE}"
+echo "BRIDGE_RNA_SMOKE=${BRIDGE_RNA_SMOKE} EPOCHS=${BRIDGE_RNA_EPOCHS} USE_ALL_SAMPLES=${BRIDGE_RNA_USE_ALL_SAMPLES} TRAIN_SUBSET=${BRIDGE_RNA_TRAIN_SUBSET} VAL_SUBSET=${BRIDGE_RNA_VAL_SUBSET} batch=${BRIDGE_RNA_BATCH_SIZE}"
 echo "BRIDGE_RNA_LOSS=${BRIDGE_RNA_LOSS} BRIDGE_RNA_HUBER_BETA=${BRIDGE_RNA_HUBER_BETA}"
+echo "BRIDGE_RNA_LEARNING_RATE=${BRIDGE_RNA_LEARNING_RATE}"
 echo "BRIDGE_RNA_DATA_DIR=${BRIDGE_RNA_DATA_DIR}"
 echo "WANDB_PROJECT=${WANDB_PROJECT} WANDB_DIR=${WANDB_DIR}"
 
-echo "DDP: 4 processes (one per GPU)"
-torchrun --standalone --nproc_per_node=4 train.py
+echo "torchrun: 1 process (single GPU; logs match 20k/1250 batch lines)"
+torchrun --standalone --nproc_per_node=1 train.py
 
 echo "Done dev job ${SLURM_JOB_ID}"
