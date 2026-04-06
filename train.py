@@ -521,6 +521,86 @@ class RowGroupBatchSampler(Sampler):
 # ============================================================
 # DATA LOADING
 # ============================================================
+def _metadata_multi_species(sample_to_species: dict) -> bool:
+    """True if samples.json lists more than one species (needs full index walk for balancing)."""
+    if not sample_to_species:
+        return False
+    return len(set(sample_to_species.values())) > 1
+
+
+def _parquet_row_counts(batch_files: list) -> list:
+    """Row counts per file (same order as sorted glob) — metadata only, no full reads."""
+    return [pq.ParquetFile(str(bf)).metadata.num_rows for bf in batch_files]
+
+
+def _global_row_index_to_pair(global_idx: int, cumsum: np.ndarray) -> tuple:
+    """Map a flat row index across concatenated Parquets to (batch_idx, row_in_file)."""
+    i = int(np.searchsorted(cumsum, global_idx, side="right") - 1)
+    row = int(global_idx - cumsum[i])
+    return (i, row)
+
+
+def _try_fast_random_parquet_subset(
+    batch_files,
+    rng,
+    train_subset,
+    val_subset,
+    balanced_sampling,
+    sample_to_species,
+    verbose,
+):
+    """
+    Single-pool random train/val split using only Parquet row counts (no full manifest walk).
+
+    Draws (train_subset + val_subset) unique global row indices across files in sorted order,
+    shuffles, then assigns train and val counts. Skips when multi-species balancing is required.
+    Returns (train_pairs, val_pairs) or None to use the full enumerator below.
+    """
+    if train_subset is None or val_subset is None:
+        return None
+    if balanced_sampling and _metadata_multi_species(sample_to_species):
+        return None
+
+    counts = _parquet_row_counts(batch_files)
+    cumsum = np.concatenate([[0], np.cumsum(counts)]).astype(np.int64)
+    total_rows = int(cumsum[-1])
+    if verbose:
+        print(
+            f"[DATA] Single-pool sample draw: {len(batch_files)} parquet files, "
+            f"{total_rows:,} rows (metadata scan only)",
+            flush=True,
+        )
+
+    requested_total = train_subset + val_subset
+    requested_total = min(requested_total, total_rows)
+    if requested_total < train_subset + val_subset and verbose:
+        print(
+            f"       Warning: only {total_rows:,} rows available; "
+            f"using {requested_total:,} for train+val pool.",
+            flush=True,
+        )
+
+    global_idx = rng.choice(total_rows, requested_total, replace=False)
+    pairs = [_global_row_index_to_pair(int(g), cumsum) for g in global_idx]
+
+    order = np.arange(len(pairs))
+    rng.shuffle(order)
+    shuffled = [pairs[i] for i in order]
+
+    train_count = min(train_subset, len(shuffled))
+    remaining = max(0, len(shuffled) - train_count)
+    val_count = min(val_subset, remaining)
+
+    train_indices = shuffled[:train_count]
+    val_indices = shuffled[train_count : train_count + val_count]
+
+    if verbose:
+        print(f"       Train: {len(train_indices):,} samples", flush=True)
+        print(f"       Val:   {len(val_indices):,} samples", flush=True)
+
+    return train_indices, val_indices
+
+
 def get_sample_indices(batch_dir, train_subset=None, val_subset=None, balanced_sampling=True, seed=42, verbose=True):
     """
     Build sample index lists for train/val without loading all data.
@@ -561,7 +641,19 @@ def get_sample_indices(batch_dir, train_subset=None, val_subset=None, balanced_s
         sample_to_species = {s["id"]: s["species"] for s in samples_meta if "species" in s}
     
     rng = np.random.default_rng(seed)
-    
+
+    fast_pairs = _try_fast_random_parquet_subset(
+        batch_files,
+        rng,
+        train_subset,
+        val_subset,
+        balanced_sampling,
+        sample_to_species,
+        verbose,
+    )
+    if fast_pairs is not None:
+        return fast_pairs
+
     # Build master list of all (batch_idx, sample_in_batch, species) tuples.
     # New preprocessing saves sample-major batch files, so sample IDs are parquet index.
     all_samples = []  # [(batch_idx, sample_in_batch, species), ...]
@@ -797,6 +889,8 @@ def _coerce_config_types(cfg: dict) -> None:
     for k in float_keys:
         if k in cfg and cfg[k] is not None:
             cfg[k] = float(cfg[k])
+    if cfg.get("loss") is not None:
+        cfg["loss"] = str(cfg["loss"]).strip().lower()
 
 
 def _apply_runtime_env_config():

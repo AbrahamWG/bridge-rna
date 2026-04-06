@@ -2,12 +2,17 @@
 # Create a directory containing ONLY symlinks to Brian's processed_mouse_*.parquet files
 # so train.py does not also load input_chunk_*.parquet from the same folder.
 #
-# Run on Savio (login or compute), from anywhere:
+# Run on Savio (login or compute), from repo root:
 #   bash scripts/setup_smoke_data_symlinks.sh
 #
-# Optional env:
-#   BRIAN_PROCESSED_DIR=/global/scratch/users/brianzhou/subset_100k_mouse
-#   SMOKE_DATA_DIR=/global/scratch/users/abrahamguan/bridge-rna-smoke-data
+# Optional env (examples):
+#   Smaller subset (~100k-sample tree):
+#     BRIAN_PROCESSED_DIR=/global/scratch/users/brianzhou/subset_100k_mouse
+#   Full processed batches only (still excludes input_chunk_* — do NOT point BRIDGE_RNA_DATA_DIR at archs4_mouse itself):
+#     BRIAN_PROCESSED_DIR=/global/scratch/users/brianzhou/archs4_mouse
+#     SMOKE_DATA_DIR=/global/scratch/users/abrahamguan/bridge-rna-mouse-processed-only
+#   Default SMOKE_DATA_DIR if unset:
+#     /global/scratch/users/abrahamguan/bridge-rna-smoke-data
 
 set -euo pipefail
 

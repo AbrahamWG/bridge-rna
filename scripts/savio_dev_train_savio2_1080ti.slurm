@@ -9,12 +9,13 @@
 #   export BRIDGE_RNA_EPOCHS=3
 #   sbatch --export=ALL scripts/savio_dev_train_savio2_1080ti.slurm
 #
-# Defaults align with Minggang’s W&B run (train_single.py sweep): 20k/4k, batch 4, lr 2e-4, hidden 768, ffn 3072.
+# Defaults: 4× GPU, 10k train / 2k val (same 5:1 ratio as 20k/4k). Minggang comparison runs often used 20k/4k — override TRAIN/VAL_SUBSET.
+# BRIDGE_RNA_BATCH_SIZE is per GPU (per DDP process). Start with 4 per GPU; if CUDA OOM, use 2 per GPU — do not raise to 8/16 per GPU on 1080 Ti.
+# Hyperparams: batch 4 per GPU, lr 2e-4, hidden 768, ffn 3072 (effective samples/step ≈ batch_size × 4 GPUs).
 # This script runs train.py + BRIDGE_RNA_DATA_DIR (batch Parquets). For identical code path as Minggang, use
 # train_single.py + merged expression.parquet (see merge.py); separate Slurm optional.
-# 1 GPU: batch 4 + 768-wide model fits ~11 GiB; raise batch only if nvidia-smi headroom allows.
-# Multi-GPU 4× hit "invalid device ordinal" on some nodes; use 1 GPU unless you verify all GPUs on the node.
-# Full dataset: BRIDGE_RNA_USE_ALL_SAMPLES=1. Re-enable 4× DDP: edit #SBATCH --gres, cpus, mem, and torchrun line below.
+# Per-GPU memory: batch 4 + 768-wide fits ~11 GiB; OOM → export BRIDGE_RNA_BATCH_SIZE=2 before sbatch, or narrow hidden/ffn.
+# Multi-GPU can hit "invalid device ordinal" on bad nodes; this script excludes n0228. Full data: BRIDGE_RNA_USE_ALL_SAMPLES=1.
 #
 # Loss ablation (MSE vs Huber / SmoothL1), compare val_mse in W&B:
 #   export BRIDGE_RNA_LOSS=smooth_l1
@@ -25,11 +26,10 @@
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
-# 1× GPU (default): comparable to single-process mentor logs. For 4× GPU DDP: --gres=gpu:4, cpus-per-task=8, mem=64G, nproc_per_node=4.
-#
-# savio2_1080ti nodes have 8 CPU cores and 64 GB RAM total per node (4× GPU per node).
-# Do NOT set cpus-per-task above 8 or sbatch fails: "CPU count per node can not be satisfied".
-#SBATCH --gres=gpu:1
+# Exclude node where CUDA/GPU init failed (see project_state.md).
+#SBATCH --exclude=n0228.savio2
+# 4× GPU DDP (matches 4× 1080 Ti per node). savio2_1080ti: 8 CPUs and 64 GB RAM per node — cpus-per-task ≤ 8.
+#SBATCH --gres=gpu:4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -63,9 +63,10 @@ export BRIDGE_RNA_SMOKE=0
 export BRIDGE_RNA_EPOCHS="${BRIDGE_RNA_EPOCHS:-5}"
 # 0 = fixed train/val counts (for comparable logs). 1 = all samples, 80/20 split.
 export BRIDGE_RNA_USE_ALL_SAMPLES="${BRIDGE_RNA_USE_ALL_SAMPLES:-0}"
-export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-20000}"
-export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-4000}"
-# Minggang sweep used batch_size 4 (not 8/16).
+# Val 2000 keeps ~20% of train (matches old 4k/20k proportion); use 1000 for faster val epochs.
+export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-10000}"
+export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-2000}"
+# Per-GPU batch (default 4; on OOM retry with 2 — not 8/16).
 export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-4}"
 export BRIDGE_RNA_LOSS="${BRIDGE_RNA_LOSS:-mse}"
 export BRIDGE_RNA_HUBER_BETA="${BRIDGE_RNA_HUBER_BETA:-1.0}"
@@ -90,7 +91,7 @@ echo "WANDB_PROJECT=${WANDB_PROJECT} WANDB_DIR=${WANDB_DIR}"
 # Reduce fragmentation OOMs on tight GPUs (PyTorch 2.x+).
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-echo "torchrun: 1 process (single GPU; ~ceil(20k/batch) train steps per epoch)"
-torchrun --standalone --nproc_per_node=1 train.py
+echo "torchrun: 4 processes (4 GPUs); ~ceil(train_subset/batch/world_size) steps per rank per epoch"
+torchrun --standalone --nproc_per_node=4 train.py
 
 echo "Done dev job ${SLURM_JOB_ID}"
