@@ -9,8 +9,11 @@
 #   export BRIDGE_RNA_EPOCHS=3
 #   sbatch --export=ALL scripts/savio_dev_train_savio2_1080ti.slurm
 #
-# Default: 1 GPU + torchrun nproc=1 — 20k/4k subsets; batch 8 fits ~11 GiB 1080 Ti (batch 16 OOM’d). Override BRIDGE_RNA_BATCH_SIZE if needed.
-# Multi-GPU 4× previously hit "invalid device ordinal" on cuda:3 on some nodes (e.g. n0302); use 1 GPU for apples-to-apples.
+# Defaults align with Minggang’s W&B run (train_single.py sweep): 20k/4k, batch 4, lr 2e-4, hidden 768, ffn 3072.
+# This script runs train.py + BRIDGE_RNA_DATA_DIR (batch Parquets). For identical code path as Minggang, use
+# train_single.py + merged expression.parquet (see merge.py); separate Slurm optional.
+# 1 GPU: batch 4 + 768-wide model fits ~11 GiB; raise batch only if nvidia-smi headroom allows.
+# Multi-GPU 4× hit "invalid device ordinal" on some nodes; use 1 GPU unless you verify all GPUs on the node.
 # Full dataset: BRIDGE_RNA_USE_ALL_SAMPLES=1. Re-enable 4× DDP: edit #SBATCH --gres, cpus, mem, and torchrun line below.
 #
 # Loss ablation (MSE vs Huber / SmoothL1), compare val_mse in W&B:
@@ -63,17 +66,23 @@ export BRIDGE_RNA_EPOCHS="${BRIDGE_RNA_EPOCHS:-5}"
 export BRIDGE_RNA_USE_ALL_SAMPLES="${BRIDGE_RNA_USE_ALL_SAMPLES:-0}"
 export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-20000}"
 export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-4000}"
-export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-8}"
+# Minggang sweep used batch_size 4 (not 8/16).
+export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-4}"
 export BRIDGE_RNA_LOSS="${BRIDGE_RNA_LOSS:-mse}"
 export BRIDGE_RNA_HUBER_BETA="${BRIDGE_RNA_HUBER_BETA:-1.0}"
-# Mentor comparison run used lr=2e-4 (train.py CONFIG default is 1e-4).
 export BRIDGE_RNA_LEARNING_RATE="${BRIDGE_RNA_LEARNING_RATE:-2e-4}"
+# Architecture match: 768 / 3072 / 2 layers / 8 heads (train.py defaults overridden).
+export BRIDGE_RNA_HIDDEN_DIM="${BRIDGE_RNA_HIDDEN_DIM:-768}"
+export BRIDGE_RNA_FFN_DIM="${BRIDGE_RNA_FFN_DIM:-3072}"
+export BRIDGE_RNA_NUM_LAYERS="${BRIDGE_RNA_NUM_LAYERS:-2}"
+export BRIDGE_RNA_NUM_HEADS="${BRIDGE_RNA_NUM_HEADS:-8}"
 
 export BRIDGE_RNA_CHECKPOINT_DIR="${SLURM_SUBMIT_DIR}/checkpoints_dev_${SLURM_JOB_ID}"
 export WANDB_PROJECT="${WANDB_PROJECT:-bridge-rna-smoke}"
 export WANDB_RUN_NAME="${WANDB_RUN_NAME:-dev-1080ti-${SLURM_JOB_ID}}"
 
 echo "BRIDGE_RNA_SMOKE=${BRIDGE_RNA_SMOKE} EPOCHS=${BRIDGE_RNA_EPOCHS} USE_ALL_SAMPLES=${BRIDGE_RNA_USE_ALL_SAMPLES} TRAIN_SUBSET=${BRIDGE_RNA_TRAIN_SUBSET} VAL_SUBSET=${BRIDGE_RNA_VAL_SUBSET} batch=${BRIDGE_RNA_BATCH_SIZE}"
+echo "BRIDGE_RNA_HIDDEN_DIM=${BRIDGE_RNA_HIDDEN_DIM} BRIDGE_RNA_FFN_DIM=${BRIDGE_RNA_FFN_DIM} layers=${BRIDGE_RNA_NUM_LAYERS} heads=${BRIDGE_RNA_NUM_HEADS}"
 echo "BRIDGE_RNA_LOSS=${BRIDGE_RNA_LOSS} BRIDGE_RNA_HUBER_BETA=${BRIDGE_RNA_HUBER_BETA}"
 echo "BRIDGE_RNA_LEARNING_RATE=${BRIDGE_RNA_LEARNING_RATE}"
 echo "BRIDGE_RNA_DATA_DIR=${BRIDGE_RNA_DATA_DIR}"
