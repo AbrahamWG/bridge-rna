@@ -30,7 +30,6 @@
 # savio2_1080ti nodes have 8 CPU cores and 64 GB RAM total per node (4× GPU per node).
 # Do NOT set cpus-per-task above 8 or sbatch fails: "CPU count per node can not be satisfied".
 #SBATCH --gres=gpu:1
-#SBATCH --exclude=n0228.savio2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
