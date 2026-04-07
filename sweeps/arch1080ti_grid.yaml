@@ -8,6 +8,7 @@
 #   wandb sweep --project bridge-rna sweeps/arch1080ti_grid.yaml
 # Savio (one trial per job):
 #   sbatch --export=ALL scripts/savio_sweep_arch1080ti.slurm
+# torchrun: 3 GPUs per trial (see --nproc_per_node below).
 
 program: train.py
 method: grid
@@ -47,5 +48,5 @@ command:
   - ${env}
   - torchrun
   - --standalone
-  - --nproc_per_node=4
+  - --nproc_per_node=3
   - ${program}

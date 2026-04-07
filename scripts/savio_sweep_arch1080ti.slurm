@@ -1,7 +1,7 @@
 #!/bin/bash
 # W&B agent: grid sweep sweeps/arch1080ti_grid.yaml (48 trials: ffn_dim × layers × hidden × loss).
 # One Slurm job = one sweep trial. Submit many jobs with the same WANDB_SWEEP_ID to drain the queue.
-# Uses 4× GPU DDP (torchrun in sweep YAML). Dev training without sweep: scripts/savio_dev_train_savio2_1080ti.slurm
+# Uses 3× GPU DDP (torchrun in sweep YAML). Dev training without sweep: scripts/savio_dev_train_savio2_1080ti.slurm
 #
 #   export WANDB_SWEEP_ID="entity/bridge-rna/sweep_xxxxxxxx"
 #   export BRIDGE_RNA_DATA_DIR=/global/scratch/users/abrahamguan/bridge-rna-smoke-data
@@ -14,8 +14,7 @@
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
-#SBATCH --gres=gpu:4
-#SBATCH --exclude=n0228.savio2
+#SBATCH --gres=gpu:3
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8

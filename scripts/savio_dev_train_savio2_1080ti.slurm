@@ -9,13 +9,13 @@
 #   export BRIDGE_RNA_EPOCHS=3
 #   sbatch --export=ALL scripts/savio_dev_train_savio2_1080ti.slurm
 #
-# Defaults: 4× GPU, 10k train / 2k val (same 5:1 ratio as 20k/4k). Minggang comparison runs often used 20k/4k — override TRAIN/VAL_SUBSET.
+# Defaults: 3× GPU DDP, 10k train / 2k val (same 5:1 ratio as 20k/4k). Minggang comparison runs often used 20k/4k — override TRAIN/VAL_SUBSET.
 # BRIDGE_RNA_BATCH_SIZE is per GPU (per DDP process). Start with 4 per GPU; if CUDA OOM, use 2 per GPU — do not raise to 8/16 per GPU on 1080 Ti.
-# Hyperparams: batch 4 per GPU, lr 2e-4, hidden 768, ffn 3072 (effective samples/step ≈ batch_size × 4 GPUs).
+# Hyperparams: batch 4 per GPU, lr 2e-4, hidden 768, ffn 3072 (effective samples/step ≈ batch_size × 3 GPUs).
 # This script runs train.py + BRIDGE_RNA_DATA_DIR (batch Parquets). For identical code path as Minggang, use
 # train_single.py + merged expression.parquet (see merge.py); separate Slurm optional.
 # Per-GPU memory: batch 4 + 768-wide fits ~11 GiB; OOM → export BRIDGE_RNA_BATCH_SIZE=2 before sbatch, or narrow hidden/ffn.
-# Multi-GPU can hit "invalid device ordinal" on bad nodes; this script excludes n0228. Full data: BRIDGE_RNA_USE_ALL_SAMPLES=1.
+# Full data: BRIDGE_RNA_USE_ALL_SAMPLES=1.
 #
 # Loss ablation (MSE vs Huber / SmoothL1), compare val_mse in W&B:
 #   export BRIDGE_RNA_LOSS=smooth_l1
@@ -26,10 +26,8 @@
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
-# Exclude node where CUDA/GPU init failed (see project_state.md).
-#SBATCH --exclude=n0228.savio2
-# 4× GPU DDP (matches 4× 1080 Ti per node). savio2_1080ti: 8 CPUs and 64 GB RAM per node — cpus-per-task ≤ 8.
-#SBATCH --gres=gpu:4
+# 3× GPU DDP (nproc_per_node=3). savio2_1080ti: 8 CPUs and 64 GB RAM per node — cpus-per-task ≤ 8.
+#SBATCH --gres=gpu:3
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -91,7 +89,7 @@ echo "WANDB_PROJECT=${WANDB_PROJECT} WANDB_DIR=${WANDB_DIR}"
 # Reduce fragmentation OOMs on tight GPUs (PyTorch 2.x+).
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-echo "torchrun: 4 processes (4 GPUs); ~ceil(train_subset/batch/world_size) steps per rank per epoch"
-torchrun --standalone --nproc_per_node=4 train.py
+echo "torchrun: 3 processes (3 GPUs); ~ceil(train_subset/batch/world_size) steps per rank per epoch"
+torchrun --standalone --nproc_per_node=3 train.py
 
 echo "Done dev job ${SLURM_JOB_ID}"
