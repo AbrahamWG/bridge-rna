@@ -985,11 +985,22 @@ def main():
 
     script_start = time.time()
 
-    # Initialize DDP
+    # torchrun sets WORLD_SIZE / LOCAL_RANK. Fail fast if Slurm exposed fewer GPUs than processes
+    # (e.g. broken node or cgroup); avoids opaque "invalid device ordinal" on cuda:2 or cuda:3.
+    _ws_env = int(os.environ.get("WORLD_SIZE", "1"))
+    _n_cuda = torch.cuda.device_count()
+    if _ws_env > _n_cuda:
+        raise RuntimeError(
+            f"[CUDA] WORLD_SIZE={_ws_env} but torch.cuda.device_count()={_n_cuda}. "
+            f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'unset')}. "
+            "Reduce --nproc_per_node / --gres=gpu, try another node, or report the host."
+        )
+
     dist.init_process_group(backend="nccl")
     rank = dist.get_rank()
     world_size = dist.get_world_size()
-    device = torch.device(f"cuda:{rank}")
+    local_rank = int(os.environ.get("LOCAL_RANK", str(rank)))
+    device = torch.device(f"cuda:{local_rank}")
     torch.cuda.set_device(device)
 
     is_main = rank == 0
@@ -999,7 +1010,11 @@ def main():
         print("\n" + "=" * 70)
         print(f"ExpressionPerformer Training — DDP ({world_size} processes)")
         print("=" * 70)
-        print(f"\n[SETUP] Rank: {rank}, Device: {device}")
+        print(
+            f"\n[SETUP] rank={rank} local_rank={local_rank} device={device} "
+            f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'unset')}",
+            flush=True,
+        )
 
     # ─────────────────────────────────────────────────────────
     # WANDB (init early so sweep can override CONFIG)
@@ -1223,7 +1238,7 @@ def main():
         compute_type=CONFIG['compute_type'],
     ).to(device)
 
-    model = DDP(model, device_ids=[rank], output_device=rank,
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank,
                 find_unused_parameters=False)
 
     total_params = sum(p.numel() for p in model.parameters())
