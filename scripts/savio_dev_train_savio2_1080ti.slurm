@@ -26,6 +26,9 @@
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
+# Temporary mitigation: n0302 has shown inconsistent GPU visibility in batch jobs.
+# Remove once admins confirm node health.
+#SBATCH --exclude=n0302.savio2
 # 2× GPU DDP (nproc_per_node=2). savio2_1080ti: 8 CPUs and 64 GB RAM per node — cpus-per-task ≤ 8.
 #SBATCH --gres=gpu:2
 #SBATCH --nodes=1
@@ -90,6 +93,23 @@ echo "WANDB_PROJECT=${WANDB_PROJECT} WANDB_DIR=${WANDB_DIR}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 echo "torchrun: 2 processes (2 GPUs); ~ceil(train_subset/batch/world_size) steps per rank per epoch"
-torchrun --standalone --nproc_per_node=2 train.py
+# On some nodes Slurm may expose N GPUs but PyTorch can only enumerate fewer usable devices.
+# Match torchrun world size to what PyTorch sees (capped at requested GPU count) to avoid immediate failure.
+VISIBLE_GPUS="$(python - <<'PY'
+import torch
+print(torch.cuda.device_count())
+PY
+)"
+echo "PyTorch sees ${VISIBLE_GPUS} CUDA device(s) on this node."
+if [[ "${VISIBLE_GPUS}" -lt 1 ]]; then
+  echo "ERROR: No CUDA devices visible to PyTorch; aborting." >&2
+  exit 1
+fi
+NPROC=2
+if [[ "${VISIBLE_GPUS}" -lt "${NPROC}" ]]; then
+  echo "WARNING: Requested ${NPROC} GPU processes but only ${VISIBLE_GPUS} visible; downgrading nproc_per_node=${VISIBLE_GPUS}." >&2
+  NPROC="${VISIBLE_GPUS}"
+fi
+torchrun --standalone --nproc_per_node="${NPROC}" train.py
 
 echo "Done dev job ${SLURM_JOB_ID}"
