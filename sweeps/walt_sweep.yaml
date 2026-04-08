@@ -1,4 +1,4 @@
-# W&B mini sweep (mentor-guided): optimize learning rate and loss only.
+# W&B mini sweep (mentor-guided): grid over learning rate × loss (6 trials: 3 LRs × 2 losses).
 # Fixed architecture/runtime: hidden_dim=320, ffn_dim=1536, num_layers=2, batch_size=4.
 # Fixed training constants: weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=favor+.
 # Metric: val_mse (fair across loss types; logged each epoch from train.py).
@@ -12,7 +12,7 @@
 # See docs/savio_wandb_sweeps.md
 
 program: train.py
-method: random
+method: grid
 metric:
   name: val_mse
   goal: minimize
@@ -21,9 +21,7 @@ parameters:
   batch_size:
     value: 4
   learning_rate:
-    distribution: log_uniform_values
-    min: 0.00012
-    max: 0.00030
+    values: [0.00015, 0.0002, 0.00025]
   weight_decay:
     value: 0
   mask_ratio:

@@ -190,7 +190,7 @@ Manual cycle (`sbatch`, `tail -f`, `sacct`, open `.err`) gets old fast. Options:
 
 ## W&B sweeps (hyperparameter search)
 
-See **`docs/savio_wandb_sweeps.md`** — mentor-style random sweeps via `sweeps/walt_sweep.yaml` and `scripts/savio_wandb_sweep_agent.slurm`.
+See **`docs/savio_wandb_sweeps.md`** — W&B sweeps via `sweeps/walt_sweep.yaml` (current: small LR×loss **grid**) and `scripts/savio_wandb_sweep_agent.slurm`.
 
 ## Official Savio docs
 

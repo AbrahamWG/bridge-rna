@@ -11,8 +11,8 @@
 #
 # Sweep policy (walt_sweep.yaml):
 #   fixed: hidden_dim=320, ffn_dim=1536, num_layers=2, batch_size=4
-#   fixed: weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=sqr
-#   swept: learning_rate + loss (mse vs smooth_l1)
+#   fixed: weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=favor+
+#   grid: learning_rate ∈ [1.5e-4, 2e-4, 2.5e-4] × loss ∈ [mse, smooth_l1] → 6 trials
 #
 #SBATCH --job-name=brna-sweep
 #SBATCH --account=ic_cdss170

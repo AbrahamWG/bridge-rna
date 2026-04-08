@@ -1,6 +1,6 @@
 # W&B sweeps on Savio (mentor-style ranges)
 
-This repo includes `sweeps/walt_sweep.yaml`: random search over architecture and optimization knobs similar to your mentor’s W&B sweep (batch size, LR, weight decay, mask ratio, `ffn_dim`, `num_layers`, `hidden_dim`, `ree_base`, `feature_type`). **`val_mse`** is the sweep metric (logged every epoch in `train.py`) for fair comparison across runs.
+This repo includes `sweeps/walt_sweep.yaml`: a **small grid** over **`learning_rate`** (`1.5e-4`, `2e-4`, `2.5e-4`) × **`loss`** (`mse`, `smooth_l1`), with architecture and other knobs **fixed** (see YAML header). **`val_mse`** is the sweep metric (logged every epoch in `train.py`) for fair comparison across runs.
 
 ## Prerequisites
 
@@ -40,10 +40,9 @@ mkdir -p logs
 sbatch --export=ALL scripts/savio_wandb_sweep_agent.slurm
 ```
 
-Submit **several** jobs with the **same** `WANDB_SWEEP_ID` to run trials in parallel (up to your fair-share / queue limits).
+Submit **several** jobs with the **same** `WANDB_SWEEP_ID` to run trials in parallel (up to your fair-share / queue limits). For the current grid there are **6** trials total (`3 × 2`).
 
 ## 3. Notes
 
-- **`train.py`** no longer forces `ffn_dim = 4 × hidden_dim` after W&B config merge, so sweeps can vary **`ffn_dim` and `hidden_dim` independently** (mentor-style).
 - Non-sweep runs can still set architecture via env, e.g. `BRIDGE_RNA_HIDDEN_DIM`, `BRIDGE_RNA_FFN_DIM`, `BRIDGE_RNA_NUM_LAYERS`, `BRIDGE_RNA_LEARNING_RATE`, etc. (see `_apply_runtime_env_config` in `train.py`).
-- For **Bayesian** optimization instead of `random`, change `method: bayes` in the YAML and re-create the sweep (see [W&B sweep docs](https://docs.wandb.ai/guides/sweeps)).
+- To use **random** or **Bayesian** search instead, change `method` in the YAML and re-create the sweep (see [W&B sweep docs](https://docs.wandb.ai/guides/sweeps)).
