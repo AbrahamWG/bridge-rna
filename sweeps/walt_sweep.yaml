@@ -1,4 +1,6 @@
-# W&B hyperparameter sweep aligned with mentor ranges (parallel coords / val_loss driver analysis).
+# W&B mini sweep (mentor-guided): optimize learning rate and loss only.
+# Fixed architecture/runtime: hidden_dim=320, ffn_dim=1536, num_layers=2, batch_size=4.
+# Fixed training constants: weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=favor+.
 # Metric: val_mse (fair across loss types; logged each epoch from train.py).
 #
 # Create the sweep (run on laptop or login node with wandb CLI):
@@ -17,35 +19,27 @@ metric:
 
 parameters:
   batch_size:
-    # 1080 Ti-safe sweep range; keep 4 as the default anchor.
-    values: [2, 4]
+    value: 4
   learning_rate:
     distribution: log_uniform_values
-    min: 0.00004
-    max: 0.00028
+    min: 0.00012
+    max: 0.00030
   weight_decay:
-    distribution: uniform
-    min: 0.0
-    max: 0.05
+    value: 0
   mask_ratio:
-    distribution: uniform
-    min: 0.10
-    max: 0.15
+    value: 0.15
   ffn_dim:
-    distribution: int_uniform
-    min: 1000
-    max: 2100
+    value: 1536
   num_layers:
-    values: [2, 3, 4]
+    value: 2
   hidden_dim:
-    # Keep hidden_dim divisible by num_heads (8) to avoid shape mismatches.
-    values: [256, 320, 384, 448, 512]
+    value: 320
   ree_base:
-    distribution: uniform
-    min: 40
-    max: 200
+    value: 100
   feature_type:
-    values: ["sqr", "favor+", "relu", "elu+1"]
+    value: favor+
+  loss:
+    values: [mse, smooth_l1]
 
 command:
   - ${env}

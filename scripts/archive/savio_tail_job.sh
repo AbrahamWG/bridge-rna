@@ -4,7 +4,7 @@ set -euo pipefail
 JOBID="${1:-}"
 
 if [[ -z "${JOBID}" ]]; then
-  echo "Usage: scripts/savio_tail_job.sh <JOBID>" >&2
+  echo "Usage: scripts/archive/savio_tail_job.sh <JOBID>" >&2
   exit 1
 fi
 
@@ -37,4 +37,3 @@ if [[ -f "${ERR_FILE}" ]]; then
   tail -n 80 "${ERR_FILE}" || true
   echo
 fi
-

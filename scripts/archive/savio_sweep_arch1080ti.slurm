@@ -1,14 +1,15 @@
 #!/bin/bash
-# W&B agent: grid sweep sweeps/arch1080ti_grid.yaml (48 trials: ffn_dim × layers × hidden × loss).
+# ARCHIVED — legacy W&B agent for architecture grid sweeps (sweeps/archive/arch1080ti_grid.yaml).
+# Current workflow: sweeps/walt_sweep.yaml + scripts/savio_wandb_sweep_agent.slurm
 # One Slurm job = one sweep trial. Submit many jobs with the same WANDB_SWEEP_ID to drain the queue.
-# Uses 3× GPU DDP (torchrun in sweep YAML). Dev training without sweep: scripts/savio_dev_train_savio2_1080ti.slurm
+# Uses 3× GPU DDP (torchrun in sweep YAML).
 #
 #   export WANDB_SWEEP_ID="entity/bridge-rna/sweep_xxxxxxxx"
 #   export BRIDGE_RNA_DATA_DIR=/global/scratch/users/abrahamguan/bridge-rna-smoke-data
-#   sbatch --export=ALL scripts/savio_sweep_arch1080ti.slurm
+#   sbatch --export=ALL scripts/archive/savio_sweep_arch1080ti.slurm
 #
 # Do not set BRIDGE_RNA_DATA_DIR to a folder that mixes processed_*.parquet with input_chunk_*.parquet.
-# Batch size comes from the sweep YAML (default 4 per GPU in arch1080ti_grid.yaml); on OOM edit that file to 2 and recreate the sweep.
+# Batch size comes from the sweep YAML (default 4 per GPU); on OOM edit arch1080ti_grid.yaml to 2 and recreate the sweep.
 #
 #SBATCH --job-name=brna-arch-sw
 #SBATCH --account=ic_cdss170
@@ -29,7 +30,7 @@ cd "${SLURM_SUBMIT_DIR}"
 mkdir -p logs
 
 if [[ -z "${WANDB_SWEEP_ID:-}" ]]; then
-  echo "ERROR: Set WANDB_SWEEP_ID to entity/project/sweep_xxx from: wandb sweep sweeps/arch1080ti_grid.yaml" >&2
+  echo "ERROR: Set WANDB_SWEEP_ID to entity/project/sweep_xxx from: wandb sweep sweeps/archive/arch1080ti_grid.yaml" >&2
   exit 1
 fi
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run ONE trial from a W&B sweep (use with: wandb sweep sweeps/walt_sweep.yaml).
+# Run ONE trial from the W&B mini sweep (use with: wandb sweep sweeps/walt_sweep.yaml).
 # Submit multiple jobs with the same WANDB_SWEEP_ID to drain the sweep queue.
 #
 # Required before sbatch:
@@ -8,6 +8,11 @@
 #   export BRIDGE_RNA_DATA_DIR=/path/to/parquet/dir
 #   export BRIDGE_RNA_TRAIN_SUBSET=8000 BRIDGE_RNA_VAL_SUBSET=800 BRIDGE_RNA_EPOCHS=5
 #   export WANDB_PROJECT=bridge-rna
+#
+# Sweep policy (walt_sweep.yaml):
+#   fixed: hidden_dim=320, ffn_dim=1536, num_layers=2, batch_size=4
+#   fixed: weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=sqr
+#   swept: learning_rate + loss (mse vs smooth_l1)
 #
 #SBATCH --job-name=brna-sweep
 #SBATCH --account=ic_cdss170

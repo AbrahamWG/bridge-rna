@@ -11,7 +11,8 @@
 #
 # Defaults: 2× GPU DDP, 10k train / 2k val (same 5:1 ratio as 20k/4k). Minggang comparison runs often used 20k/4k — override TRAIN/VAL_SUBSET.
 # BRIDGE_RNA_BATCH_SIZE is per GPU (per DDP process). Start with 4 per GPU; if CUDA OOM, use 2 per GPU — do not raise to 8/16 per GPU on 1080 Ti.
-# Hyperparams: batch 4 per GPU, lr 2e-4, hidden 768, ffn 3072 (effective samples/step ≈ batch_size × 2 GPUs).
+# Aligned with sweeps/walt_sweep.yaml (fixed arch): hidden 320, ffn 1536, layers 2, feature_type favor+, mask 0.15, ree_base 100, wd 0.
+# Override e.g. BRIDGE_RNA_HIDDEN_DIM=768 for larger dev runs (watch VRAM on 1080 Ti).
 # This script runs train.py + BRIDGE_RNA_DATA_DIR (batch Parquets). For identical code path as Minggang, use
 # train_single.py + merged expression.parquet (see merge.py); separate Slurm optional.
 # Per-GPU memory: batch 4 + 768-wide fits ~11 GiB; OOM → export BRIDGE_RNA_BATCH_SIZE=2 before sbatch, or narrow hidden/ffn.
@@ -74,9 +75,14 @@ export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-4}"
 export BRIDGE_RNA_LOSS="${BRIDGE_RNA_LOSS:-mse}"
 export BRIDGE_RNA_HUBER_BETA="${BRIDGE_RNA_HUBER_BETA:-1.0}"
 export BRIDGE_RNA_LEARNING_RATE="${BRIDGE_RNA_LEARNING_RATE:-2e-4}"
-# Architecture match: 768 / 3072 / 2 layers / 8 heads (train.py defaults overridden).
-export BRIDGE_RNA_HIDDEN_DIM="${BRIDGE_RNA_HIDDEN_DIM:-768}"
-export BRIDGE_RNA_FFN_DIM="${BRIDGE_RNA_FFN_DIM:-3072}"
+export BRIDGE_RNA_WEIGHT_DECAY="${BRIDGE_RNA_WEIGHT_DECAY:-0}"
+export BRIDGE_RNA_MASK_RATIO="${BRIDGE_RNA_MASK_RATIO:-0.15}"
+export BRIDGE_RNA_REE_BASE="${BRIDGE_RNA_REE_BASE:-100}"
+# FAVOR+ kernel (Performer-style); see train.py CONFIG / slim_performer_model.py
+export BRIDGE_RNA_FEATURE_TYPE="${BRIDGE_RNA_FEATURE_TYPE:-favor+}"
+# Architecture: match walt mini-sweep fixed dims unless overridden.
+export BRIDGE_RNA_HIDDEN_DIM="${BRIDGE_RNA_HIDDEN_DIM:-320}"
+export BRIDGE_RNA_FFN_DIM="${BRIDGE_RNA_FFN_DIM:-1536}"
 export BRIDGE_RNA_NUM_LAYERS="${BRIDGE_RNA_NUM_LAYERS:-2}"
 export BRIDGE_RNA_NUM_HEADS="${BRIDGE_RNA_NUM_HEADS:-8}"
 
@@ -86,6 +92,7 @@ export WANDB_RUN_NAME="${WANDB_RUN_NAME:-dev-1080ti-${SLURM_JOB_ID}}"
 
 echo "BRIDGE_RNA_SMOKE=${BRIDGE_RNA_SMOKE} EPOCHS=${BRIDGE_RNA_EPOCHS} USE_ALL_SAMPLES=${BRIDGE_RNA_USE_ALL_SAMPLES} TRAIN_SUBSET=${BRIDGE_RNA_TRAIN_SUBSET} VAL_SUBSET=${BRIDGE_RNA_VAL_SUBSET} batch=${BRIDGE_RNA_BATCH_SIZE}"
 echo "BRIDGE_RNA_HIDDEN_DIM=${BRIDGE_RNA_HIDDEN_DIM} BRIDGE_RNA_FFN_DIM=${BRIDGE_RNA_FFN_DIM} layers=${BRIDGE_RNA_NUM_LAYERS} heads=${BRIDGE_RNA_NUM_HEADS}"
+echo "BRIDGE_RNA_FEATURE_TYPE=${BRIDGE_RNA_FEATURE_TYPE} BRIDGE_RNA_WEIGHT_DECAY=${BRIDGE_RNA_WEIGHT_DECAY} mask=${BRIDGE_RNA_MASK_RATIO} ree_base=${BRIDGE_RNA_REE_BASE}"
 echo "BRIDGE_RNA_LOSS=${BRIDGE_RNA_LOSS} BRIDGE_RNA_HUBER_BETA=${BRIDGE_RNA_HUBER_BETA}"
 echo "BRIDGE_RNA_LEARNING_RATE=${BRIDGE_RNA_LEARNING_RATE}"
 echo "BRIDGE_RNA_DATA_DIR=${BRIDGE_RNA_DATA_DIR}"

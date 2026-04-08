@@ -1,13 +1,13 @@
-# Minimal grid: ffn_dim × num_layers × hidden_dim × loss (MSE vs Smooth L1).
+# ARCHIVED — minimal grid: ffn_dim × num_layers × hidden_dim × loss (MSE vs Smooth L1).
 # Fixed: lr 2e-4, wd 0, mask_ratio 0.15, ree_base 100, batch 4 per GPU, feature_type sqr.
 # If CUDA OOM on 1080 Ti: set batch_size to 2 here and re-run `wandb sweep`, or use a smaller hidden/ffn sweep.
 # Compare runs on val_mse (masked MSE; comparable across loss types).
 # Full factorial: 3 × 2 × 4 × 2 = 48 trials — submit multiple agents with same WANDB_SWEEP_ID.
 #
 # Create sweep (login or laptop):
-#   wandb sweep --project bridge-rna sweeps/arch1080ti_grid.yaml
-# Savio (one trial per job):
-#   sbatch --export=ALL scripts/savio_sweep_arch1080ti.slurm
+#   wandb sweep --project bridge-rna sweeps/archive/arch1080ti_grid.yaml
+# Savio (one trial per job), from repo root:
+#   sbatch --export=ALL scripts/archive/savio_sweep_arch1080ti.slurm
 # torchrun: 3 GPUs per trial (see --nproc_per_node below).
 
 program: train.py
