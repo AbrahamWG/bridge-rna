@@ -19,8 +19,9 @@
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
 #SBATCH --gres=gpu:2
-# Temporary mitigation: avoid historically flaky GPU nodes; adjust as admins confirm.
-#SBATCH --exclude=n0228.savio2,n0302.savio2
+# Temporary mitigation: avoid flaky GPU nodes (CUDA init / visibility); adjust as admins confirm.
+# n0227: sweep jobs saw CUDA unknown error → 0 GPUs + NCCL fail (2026-04).
+#SBATCH --exclude=n0227.savio2,n0228.savio2,n0302.savio2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4

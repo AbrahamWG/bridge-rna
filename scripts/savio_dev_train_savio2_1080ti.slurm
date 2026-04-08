@@ -27,9 +27,8 @@
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
-# Temporary mitigation: n0302 has shown inconsistent GPU visibility in batch jobs.
-# Remove once admins confirm node health.
-#SBATCH --exclude=n0302.savio2
+# Temporary mitigation: flaky GPU visibility / CUDA init on some hosts (see project_state.md).
+#SBATCH --exclude=n0227.savio2,n0302.savio2
 # 2× GPU DDP (nproc_per_node=2). savio2_1080ti: 8 CPUs and ~64 GB RAM per node — cpus-per-task ≤ 8.
 #STRICT: use --mem=60G, not 64G (see project_state.md).
 #SBATCH --gres=gpu:2
