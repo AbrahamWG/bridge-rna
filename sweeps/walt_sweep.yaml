@@ -39,9 +39,10 @@ parameters:
   loss:
     values: [mse, smooth_l1]
 
+# Single-GPU launch avoids NCCL / DDP skew from uneven streaming shards per rank (Savio 2×1080 Ti).
 command:
   - ${env}
   - torchrun
   - --standalone
-  - --nproc_per_node=2
+  - --nproc_per_node=1
   - ${program}

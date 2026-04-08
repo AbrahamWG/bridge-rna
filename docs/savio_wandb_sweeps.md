@@ -1,6 +1,6 @@
 # W&B sweeps on Savio (mentor-style ranges)
 
-This repo includes `sweeps/walt_sweep.yaml`: a **small grid** over **`learning_rate`** (`1.5e-4`, `2e-4`, `2.5e-4`) × **`loss`** (`mse`, `smooth_l1`), with architecture and other knobs **fixed** (see YAML header). **`val_mse`** is the sweep metric (logged every epoch in `train.py`) for fair comparison across runs.
+This repo includes `sweeps/walt_sweep.yaml`: a **small grid** over **`learning_rate`** (`1.5e-4`, `2e-4`, `2.5e-4`) × **`loss`** (`mse`, `smooth_l1`), with architecture and other knobs **fixed** (see YAML header). The sweep command uses **`torchrun --nproc_per_node=1`** (single GPU) so runs do not depend on NCCL / uneven streaming splits across ranks. **`val_mse`** is the sweep metric (logged every epoch in `train.py`) for fair comparison across runs.
 
 ## Prerequisites
 
@@ -17,6 +17,8 @@ wandb sweep --project bridge-rna sweeps/walt_sweep.yaml
 ```
 
 Copy the **`wandb agent ...`** line. The sweep ID looks like `your-entity/bridge-rna/sweep_abc123`.
+
+**Important:** The command block (e.g. `torchrun --nproc_per_node=...`) is **fixed when you create the sweep**. If you edit `walt_sweep.yaml` later, run **`wandb sweep ...` again** and use the **new** sweep ID — old sweeps on W&B still use the previous command.
 
 ## 2. Run agents on Savio (one trial per job)
 

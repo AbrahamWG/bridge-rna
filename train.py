@@ -70,6 +70,8 @@ def _ddp_join_ctx(model, world_size):
     """
     DDP uneven inputs: streaming assigns disjoint Parquet files per rank, so batch
     counts can differ. Without Join, ranks desync and torchrun reports worker exit 1.
+    Training uses RowGroupBatchSampler(..., drop_last=True) to drop short tail batches
+    per row-group and reduce (not eliminate) step skew; Join still covers any remainder.
     """
     if world_size <= 1 or _DDPJoin is None:
         return contextlib.nullcontext()
@@ -1131,12 +1133,14 @@ def main():
     # DATASETS & DATALOADERS
     # ─────────────────────────────────────────────────────────
     if data_mode == 'streaming':
+        # Train: drop_last=True avoids partial batches at end of each (file, row_group)
+        # and reduces DDP step mismatch vs val (still may differ across ranks → Join).
         train_batch_sampler = RowGroupBatchSampler(
             train_ds.group_to_indices,
             batch_size=CONFIG['batch_size'],
             shuffle=True,
             seed=CONFIG.get('seed', 42),
-            drop_last=False,
+            drop_last=True,
         )
         val_batch_sampler = RowGroupBatchSampler(
             val_ds.group_to_indices,
@@ -1187,30 +1191,47 @@ def main():
             **loader_kwargs,
         )
     else:
-        train_loader = DataLoader(train_ds, batch_size=CONFIG['batch_size'],
-                                  sampler=train_sampler, **loader_kwargs)
-        val_loader = DataLoader(val_ds, batch_size=CONFIG['batch_size'],
-                                sampler=val_sampler, **loader_kwargs)
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=CONFIG['batch_size'],
+            sampler=train_sampler,
+            drop_last=True,
+            **loader_kwargs,
+        )
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=CONFIG['batch_size'],
+            sampler=val_sampler,
+            drop_last=False,
+            **loader_kwargs,
+        )
 
-    if is_main:
-        if world_size > 1:
+    if world_size > 1:
+        for r in range(world_size):
+            dist.barrier()
+            if rank == r:
+                print(
+                    f"\n[DDP] rank {rank}/{world_size} "
+                    f"train_samples={len(train_ds):,} val_samples={len(val_ds):,} "
+                    f"train_batches={len(train_loader)} val_batches={len(val_loader)}",
+                    flush=True,
+                )
+        dist.barrier()
+        if is_main:
+            prep_to_loaders = time.time() - script_start
             print(
-                f"\n[DATA] Train (rank {rank}): {len(train_ds):,} samples, {len(train_loader)} batches",
+                f"[PREP] Data loaders ready (elapsed since process start: {prep_to_loaders:.1f}s)",
                 flush=True,
             )
-            print(
-                f"[DATA] Val (rank {rank}):   {len(val_ds):,} samples, {len(val_loader)} batches",
-                flush=True,
-            )
-        else:
-            print(
-                f"\n[DATA] Train: {len(train_ds):,} samples, {len(train_loader)} batches",
-                flush=True,
-            )
-            print(
-                f"[DATA] Val:   {len(val_ds):,} samples, {len(val_loader)} batches",
-                flush=True,
-            )
+    elif is_main:
+        print(
+            f"\n[DATA] Train: {len(train_ds):,} samples, {len(train_loader)} batches",
+            flush=True,
+        )
+        print(
+            f"[DATA] Val:   {len(val_ds):,} samples, {len(val_loader)} batches",
+            flush=True,
+        )
         prep_to_loaders = time.time() - script_start
         print(
             f"[PREP] Data loaders ready (elapsed since process start: {prep_to_loaders:.1f}s)",

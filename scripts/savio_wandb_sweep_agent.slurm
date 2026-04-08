@@ -13,12 +13,13 @@
 #   fixed: hidden_dim=320, ffn_dim=1536, num_layers=2, batch_size=4
 #   fixed: weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=favor+
 #   grid: learning_rate ∈ [1.5e-4, 2e-4, 2.5e-4] × loss ∈ [mse, smooth_l1] → 6 trials
+#   torchrun --nproc_per_node=1 (no DDP / NCCL; see walt_sweep.yaml command:)
 #
 #SBATCH --job-name=brna-sweep
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 # Temporary mitigation: avoid flaky GPU nodes (CUDA init / visibility); adjust as admins confirm.
 # n0227: sweep jobs saw CUDA unknown error → 0 GPUs + NCCL fail (2026-04).
 #SBATCH --exclude=n0227.savio2,n0228.savio2,n0302.savio2
