@@ -30,11 +30,11 @@
 # Remove once admins confirm node health.
 #SBATCH --exclude=n0302.savio2
 # 2× GPU DDP (nproc_per_node=2). savio2_1080ti: 8 CPUs and 64 GB RAM per node — cpus-per-task ≤ 8.
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:3
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=60G
 # Full-dataset epochs are much slower than 2k-subset runs; increase if jobs hit TIMEOUT.
 #SBATCH --time=3-00:00:00
 #SBATCH --output=logs/slurm-%j.out
