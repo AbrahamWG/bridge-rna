@@ -2,7 +2,7 @@
 # Metric: val_mse (fair across loss types; logged each epoch from train.py).
 #
 # Create the sweep (run on laptop or login node with wandb CLI):
-#   wandb sweep --project bridge-rna sweeps/mentor_style_sweep.yaml
+#   wandb sweep --project bridge-rna sweeps/walt_sweep.yaml
 # Then submit one or more Savio jobs (each runs a single sweep trial):
 #   export WANDB_SWEEP_ID="entity/bridge-rna/sweep_xxxx"
 #   sbatch scripts/savio_wandb_sweep_agent.slurm
@@ -51,5 +51,5 @@ command:
   - ${env}
   - torchrun
   - --standalone
-  - --nproc_per_node=1
+  - --nproc_per_node=2
   - ${program}

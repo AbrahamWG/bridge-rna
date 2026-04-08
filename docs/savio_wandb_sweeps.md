@@ -1,6 +1,6 @@
 # W&B sweeps on Savio (mentor-style ranges)
 
-This repo includes `sweeps/mentor_style_sweep.yaml`: random search over architecture and optimization knobs similar to your mentor’s W&B sweep (batch size, LR, weight decay, mask ratio, `ffn_dim`, `num_layers`, `hidden_dim`, `ree_base`, `feature_type`). **`val_mse`** is the sweep metric (logged every epoch in `train.py`) for fair comparison across runs.
+This repo includes `sweeps/walt_sweep.yaml`: random search over architecture and optimization knobs similar to your mentor’s W&B sweep (batch size, LR, weight decay, mask ratio, `ffn_dim`, `num_layers`, `hidden_dim`, `ree_base`, `feature_type`). **`val_mse`** is the sweep metric (logged every epoch in `train.py`) for fair comparison across runs.
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ This repo includes `sweeps/mentor_style_sweep.yaml`: random search over architec
 From the repo root (anywhere with the CLI and network):
 
 ```bash
-wandb sweep --project bridge-rna sweeps/mentor_style_sweep.yaml
+wandb sweep --project bridge-rna sweeps/walt_sweep.yaml
 ```
 
 Copy the **`wandb agent ...`** line. The sweep ID looks like `your-entity/bridge-rna/sweep_abc123`.

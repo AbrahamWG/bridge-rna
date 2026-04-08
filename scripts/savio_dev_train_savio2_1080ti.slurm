@@ -29,13 +29,15 @@
 # Temporary mitigation: n0302 has shown inconsistent GPU visibility in batch jobs.
 # Remove once admins confirm node health.
 #SBATCH --exclude=n0302.savio2
-# 2× GPU DDP (nproc_per_node=2). savio2_1080ti: 8 CPUs and 64 GB RAM per node — cpus-per-task ≤ 8.
-#SBATCH --gres=gpu:3
+# 2× GPU DDP (nproc_per_node=2). savio2_1080ti: 8 CPUs and ~64 GB RAM per node — cpus-per-task ≤ 8.
+#STRICT: use --mem=60G, not 64G (see project_state.md).
+#SBATCH --gres=gpu:2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=60G
-# Full-dataset epochs are much slower than 2k-subset runs; increase if jobs hit TIMEOUT.
+# Full-dataset epochs are much slower than 10k-subset runs; increase if jobs hit TIMEOUT.
+#STRICT: dev jobs on savio2_1080ti should keep --mem=60G and time ≤ 3 days.
 #SBATCH --time=3-00:00:00
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err

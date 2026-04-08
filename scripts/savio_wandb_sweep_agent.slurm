@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run ONE trial from a W&B sweep (use with: wandb sweep sweeps/mentor_style_sweep.yaml).
+# Run ONE trial from a W&B sweep (use with: wandb sweep sweeps/walt_sweep.yaml).
 # Submit multiple jobs with the same WANDB_SWEEP_ID to drain the sweep queue.
 #
 # Required before sbatch:
@@ -13,12 +13,14 @@
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
-#SBATCH --gres=gpu:1
-#SBATCH --exclude=n0228.savio2
+#SBATCH --gres=gpu:2
+# Temporary mitigation: avoid historically flaky GPU nodes; adjust as admins confirm.
+#SBATCH --exclude=n0228.savio2,n0302.savio2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#STRICT: use --mem=60G on savio2_1080ti (64G is not allocatable on most nodes).
+#SBATCH --mem=60G
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/slurm-sweep-%j.out
 #SBATCH --error=logs/slurm-sweep-%j.err
@@ -49,8 +51,8 @@ fi
 
 export BRIDGE_RNA_SMOKE=0
 export BRIDGE_RNA_EPOCHS="${BRIDGE_RNA_EPOCHS:-5}"
-export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-4000}"
-export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-800}"
+export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-10000}"
+export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-2000}"
 export BRIDGE_RNA_LOSS="${BRIDGE_RNA_LOSS:-mse}"
 export BRIDGE_RNA_CHECKPOINT_DIR="${SLURM_SUBMIT_DIR}/checkpoints_sweep_${SLURM_JOB_ID}"
 export WANDB_PROJECT="${WANDB_PROJECT:-bridge-rna}"
