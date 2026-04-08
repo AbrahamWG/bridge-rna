@@ -37,9 +37,8 @@ parameters:
   num_layers:
     values: [2, 3, 4]
   hidden_dim:
-    distribution: int_uniform
-    min: 240
-    max: 520
+    # Keep hidden_dim divisible by num_heads (8) to avoid shape mismatches.
+    values: [256, 320, 384, 448, 512]
   ree_base:
     distribution: uniform
     min: 40
