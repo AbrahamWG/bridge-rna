@@ -865,6 +865,14 @@ def format_float_for_tag(v: float) -> str:
     return s.replace('.', 'p').replace('+', '').replace('-', 'm')
 
 
+def format_duration_hm(seconds: float) -> str:
+    """Format duration as HHhMMm (clamped at 0)."""
+    total_seconds = max(0, int(seconds))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    return f"{hours:02d}h{minutes:02d}m"
+
+
 def build_run_tag(cfg: dict) -> str:
     return (
         f"norm-{cfg['normalization']}"
@@ -893,6 +901,20 @@ def _coerce_config_types(cfg: dict) -> None:
             cfg[k] = float(cfg[k])
     if cfg.get("loss") is not None:
         cfg["loss"] = str(cfg["loss"]).strip().lower()
+
+
+def _wandb_sweep_config_view(cfg: dict) -> dict:
+    """
+    Keep only experiment-defining hyperparameters in W&B config importance views.
+    Excludes run-specific paths/ids (e.g., checkpoint_dir) that can create spurious importances.
+    """
+    allowed = (
+        "learning_rate", "loss", "batch_size", "weight_decay", "mask_ratio",
+        "hidden_dim", "ffn_dim", "num_layers", "num_heads", "ree_base",
+        "feature_type", "huber_beta", "normalization", "data_mode",
+        "train_subset", "val_subset", "epochs", "balanced_sampling", "seed",
+    )
+    return {k: cfg[k] for k in allowed if k in cfg}
 
 
 def _apply_runtime_env_config():
@@ -1036,7 +1058,7 @@ def main():
                 CONFIG[key] = wandb.config[key]
         _coerce_config_types(CONFIG)
         # Mentor-style sweeps vary ffn_dim independently of hidden_dim; do not force 4× here.
-        wandb.config.update(CONFIG, allow_val_change=True)
+        wandb.config.update(_wandb_sweep_config_view(CONFIG), allow_val_change=True)
 
     # Broadcast CONFIG from rank 0 so all ranks use the same hyperparams
     config_list = [CONFIG if is_main else None]
@@ -1399,7 +1421,7 @@ def main():
                             f"  Epoch {epoch+1}/{CONFIG['epochs']} | "
                             f"Batch 1/{total_b} (first batch) | "
                             f"Loss: {loss.item():.6f} | "
-                            f"~ETA this epoch (naive): {eta_epoch_sec / 60.0:.1f}m",
+                            f"~ETA this epoch (naive): {format_duration_hm(eta_epoch_sec)}",
                             flush=True,
                         )
 
@@ -1412,7 +1434,7 @@ def main():
                     if done > 0 and elapsed > 0:
                         sec_per_batch = elapsed / done
                         eta_epoch_sec = sec_per_batch * (total_b - done)
-                        eta_str = f" | ETA this epoch: {eta_epoch_sec / 60.0:.1f}m"
+                        eta_str = f" | ETA this epoch: {format_duration_hm(eta_epoch_sec)}"
                     else:
                         eta_str = ""
                     prev_str = ""
