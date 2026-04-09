@@ -28,7 +28,8 @@
 #SBATCH --cpus-per-task=4
 #STRICT: use --mem=60G on savio2_1080ti (64G is not allocatable on most nodes).
 #SBATCH --mem=60G
-#SBATCH --time=04:00:00
+# Increase walltime: recent sweep agents timed out at 4h before trial completion.
+#SBATCH --time=12:00:00
 #SBATCH --output=logs/slurm-sweep-%j.out
 #SBATCH --error=logs/slurm-sweep-%j.err
 
@@ -57,7 +58,7 @@ if [[ ! -d "$BRIDGE_RNA_DATA_DIR" ]]; then
 fi
 
 export BRIDGE_RNA_SMOKE=0
-export BRIDGE_RNA_EPOCHS="${BRIDGE_RNA_EPOCHS:-5}"
+export BRIDGE_RNA_EPOCHS="${BRIDGE_RNA_EPOCHS:-3}"
 export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-10000}"
 export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-2000}"
 export BRIDGE_RNA_LOSS="${BRIDGE_RNA_LOSS:-mse}"
@@ -66,6 +67,7 @@ export WANDB_PROJECT="${WANDB_PROJECT:-bridge-rna}"
 
 echo "WANDB_SWEEP_ID=${WANDB_SWEEP_ID}"
 echo "BRIDGE_RNA_DATA_DIR=${BRIDGE_RNA_DATA_DIR}"
+echo "slurm_timelimit=12:00:00"
 echo "epochs=${BRIDGE_RNA_EPOCHS} train=${BRIDGE_RNA_TRAIN_SUBSET} val=${BRIDGE_RNA_VAL_SUBSET}"
 
 # One sweep trial per job (agent pulls next hyperparams from W&B)
