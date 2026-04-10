@@ -1,0 +1,40 @@
+# Single-trial MSE baseline at the prior best corner (lr=2e-4, num_layers=2).
+# Compare val_mse to the smooth_l1 grid in walt_sweep.yaml without a full MSE grid.
+#
+#   wandb sweep --project bridge-rna sweeps/walt_mse_anchor.yaml
+#   export WANDB_SWEEP_ID=... && sbatch --export=ALL scripts/savio_wandb_sweep_agent.slurm
+
+program: train.py
+method: grid
+metric:
+  name: val_mse
+  goal: minimize
+
+parameters:
+  batch_size:
+    value: 4
+  learning_rate:
+    value: 0.0002
+  weight_decay:
+    value: 0
+  mask_ratio:
+    value: 0.15
+  ffn_dim:
+    value: 1536
+  num_layers:
+    value: 2
+  hidden_dim:
+    value: 320
+  ree_base:
+    value: 100
+  feature_type:
+    value: favor+
+  loss:
+    value: mse
+
+command:
+  - ${env}
+  - torchrun
+  - --standalone
+  - --nproc_per_node=1
+  - ${program}

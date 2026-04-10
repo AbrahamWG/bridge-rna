@@ -9,11 +9,10 @@
 #   export BRIDGE_RNA_TRAIN_SUBSET=8000 BRIDGE_RNA_VAL_SUBSET=800 BRIDGE_RNA_EPOCHS=5
 #   export WANDB_PROJECT=bridge-rna
 #
-# Sweep policy (walt_sweep.yaml):
-#   fixed: hidden_dim=320, ffn_dim=1536, num_layers=2, batch_size=4
-#   fixed: weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=favor+
-#   grid: learning_rate ∈ [1.5e-4, 2e-4, 2.5e-4] × loss ∈ [mse, smooth_l1] → 6 trials
-#   torchrun --nproc_per_node=1 (no DDP / NCCL; see walt_sweep.yaml command:)
+# Sweep YAML (pick one; each needs its own `wandb sweep` → WANDB_SWEEP_ID):
+#   walt_sweep.yaml — grid LR ∈ {1.8e-4, 2e-4, 2.2e-4} × num_layers ∈ {2, 4}, loss=smooth_l1 → 6 trials
+#   walt_mse_anchor.yaml — 1 trial: MSE at lr=2e-4, num_layers=2 (baseline vs Huber grid)
+#   torchrun --nproc_per_node=1 (see YAML command:)
 #
 #SBATCH --job-name=brna-sweep
 #SBATCH --account=ic_cdss170

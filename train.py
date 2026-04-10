@@ -162,9 +162,9 @@ CONFIG = {
     'num_workers': 0,
     'prefetch_factor': 2,
     'persistent_workers': False,
-    # Data subset sizes (set to None for all available)
-    'train_subset': 2000,
-    'val_subset': 400,
+    # Data subset sizes (set to None for all available); 10k/2k matches Savio sweep defaults
+    'train_subset': 10000,
+    'val_subset': 2000,
     'balanced_sampling': True,
     'data_dir': './data/archs4/train_orthologs',
     'checkpoint_dir': './checkpoints_performer',
@@ -1050,7 +1050,7 @@ def main():
             project=os.environ.get("WANDB_PROJECT", "expression-performer"),
             entity=_wandb_entity if _wandb_entity else None,
             name=os.environ.get("WANDB_RUN_NAME") or None,
-            config=CONFIG,
+            config=_wandb_sweep_config_view(CONFIG),
         )
         # When running a sweep, wandb.config overrides CONFIG values
         for key in CONFIG:
@@ -1060,10 +1060,13 @@ def main():
         # Mentor-style sweeps vary ffn_dim independently of hidden_dim; do not force 4× here.
         wandb.config.update(_wandb_sweep_config_view(CONFIG), allow_val_change=True)
 
-    # Broadcast CONFIG from rank 0 so all ranks use the same hyperparams
-    config_list = [CONFIG if is_main else None]
-    dist.broadcast_object_list(config_list, src=0)
-    CONFIG.update(config_list[0])
+    # Broadcast CONFIG from rank 0 so all ranks use the same hyperparams (sweep overrides on rank 0).
+    # With world_size==1 (single-GPU torchrun), skip broadcast: it still runs GPU tensor staging inside
+    # PyTorch and can raise "CUDA ... busy or unavailable" on some nodes; no other ranks to sync.
+    if world_size > 1:
+        config_list = [CONFIG if is_main else None]
+        dist.broadcast_object_list(config_list, src=0)
+        CONFIG.update(config_list[0])
 
     # ─────────────────────────────────────────────────────────
     # LOAD DATA

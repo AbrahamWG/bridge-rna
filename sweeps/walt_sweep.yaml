@@ -1,13 +1,14 @@
-# W&B mini sweep (mentor-guided): grid over learning rate × loss (6 trials: 3 LRs × 2 losses).
-# Fixed architecture/runtime: hidden_dim=320, ffn_dim=1536, num_layers=2, batch_size=4.
-# Fixed training constants: weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=favor+.
-# Metric: val_mse (fair across loss types; logged each epoch from train.py).
+# W&B sweep: grid learning_rate × num_layers (6 trials), loss locked to smooth_l1.
+# Prior 6-run sweep: smooth_l1 beat mse on val_mse; LR refined around 2e-4.
+# One MSE comparison run: use sweeps/walt_mse_anchor.yaml (1 trial at lr=2e-4, layers=2).
 #
-# Create the sweep (run on laptop or login node with wandb CLI):
+# Fixed: hidden_dim=320, ffn_dim=1536, batch_size=4, loss=smooth_l1,
+#   weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=favor+.
+# Metric: val_mse (logged every epoch in train.py).
+#
+# Create sweep (laptop or Savio login):
 #   wandb sweep --project bridge-rna sweeps/walt_sweep.yaml
-# Then submit one or more Savio jobs (each runs a single sweep trial):
-#   export WANDB_SWEEP_ID="entity/bridge-rna/sweep_xxxx"
-#   sbatch scripts/savio_wandb_sweep_agent.slurm
+# Then: export WANDB_SWEEP_ID=... && sbatch --export=ALL scripts/savio_wandb_sweep_agent.slurm
 #
 # See docs/savio_wandb_sweeps.md
 
@@ -21,7 +22,7 @@ parameters:
   batch_size:
     value: 4
   learning_rate:
-    values: [0.00015, 0.0002, 0.00025]
+    values: [0.00018, 0.0002, 0.00022]
   weight_decay:
     value: 0
   mask_ratio:
@@ -29,7 +30,7 @@ parameters:
   ffn_dim:
     value: 1536
   num_layers:
-    value: 2
+    values: [2, 4]
   hidden_dim:
     value: 320
   ree_base:
@@ -37,9 +38,9 @@ parameters:
   feature_type:
     value: favor+
   loss:
-    values: [mse, smooth_l1]
+    value: smooth_l1
 
-# Single-GPU launch avoids NCCL / DDP skew from uneven streaming shards per rank (Savio 2×1080 Ti).
+# Single-GPU: no NCCL / uneven streaming skew across ranks.
 command:
   - ${env}
   - torchrun

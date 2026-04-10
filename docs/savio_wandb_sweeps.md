@@ -1,6 +1,11 @@
 # W&B sweeps on Savio (mentor-style ranges)
 
-This repo includes `sweeps/walt_sweep.yaml`: a **small grid** over **`learning_rate`** (`1.5e-4`, `2e-4`, `2.5e-4`) × **`loss`** (`mse`, `smooth_l1`), with architecture and other knobs **fixed** (see YAML header). The sweep command uses **`torchrun --nproc_per_node=1`** (single GPU) so runs do not depend on NCCL / uneven streaming splits across ranks. **`val_mse`** is the sweep metric (logged every epoch in `train.py`) for fair comparison across runs.
+This repo includes:
+
+- **`sweeps/walt_sweep.yaml`** — grid **`learning_rate`** ∈ `{1.8e-4, 2e-4, 2.2e-4}` × **`num_layers`** ∈ `{2, 4}`, **`loss` locked to `smooth_l1`** (6 trials). Other knobs fixed (see YAML).
+- **`sweeps/walt_mse_anchor.yaml`** — **one** trial: **`mse`** at **`lr=2e-4`**, **`num_layers=2`**, to keep a single MSE baseline for **`val_mse`** comparison without a full MSE grid.
+
+Both use **`torchrun --nproc_per_node=1`** (single GPU). **`val_mse`** is the sweep metric (logged every epoch in `train.py`).
 
 ## Prerequisites
 
@@ -42,7 +47,7 @@ mkdir -p logs
 sbatch --export=ALL scripts/savio_wandb_sweep_agent.slurm
 ```
 
-Submit **several** jobs with the **same** `WANDB_SWEEP_ID` to run trials in parallel (up to your fair-share / queue limits). For the current grid there are **6** trials total (`3 × 2`).
+Submit **several** jobs with the **same** `WANDB_SWEEP_ID` to run trials in parallel (up to your fair-share / queue limits). **`walt_sweep.yaml`** has **6** trials (`3 × 2`); **`walt_mse_anchor.yaml`** has **1** trial (create a separate sweep and run one agent).
 
 ## 3. Notes
 
