@@ -1,5 +1,6 @@
-# Single-trial MSE baseline at the prior best corner (lr=2e-4, num_layers=2).
-# Compare val_mse to the smooth_l1 grid in walt_sweep.yaml without a full MSE grid.
+# Single-trial MSE baseline at lr=2e-4, num_layers=2 (fixed small arch in YAML).
+# Optional: walt_sweep.yaml includes loss=mse in the 12-trial grid — use this only for a
+# one-off MSE run without registering that sweep.
 #
 #   wandb sweep --project bridge-rna sweeps/walt_mse_anchor.yaml
 #   export WANDB_SWEEP_ID=... && sbatch --export=ALL scripts/savio_wandb_sweep_agent.slurm

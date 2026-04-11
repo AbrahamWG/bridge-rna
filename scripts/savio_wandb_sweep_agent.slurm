@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run ONE trial from the W&B mini sweep (use with: wandb sweep sweeps/walt_sweep.yaml).
+# Run ONE trial from the W&B sweep (use with: wandb sweep sweeps/walt_sweep.yaml).
 # Submit multiple jobs with the same WANDB_SWEEP_ID to drain the sweep queue.
 #
 # Required before sbatch:
@@ -10,8 +10,8 @@
 #   export WANDB_PROJECT=bridge-rna
 #
 # Sweep YAML (pick one; each needs its own `wandb sweep` → WANDB_SWEEP_ID):
-#   walt_sweep.yaml — grid LR ∈ {1.8e-4, 2e-4, 2.2e-4} × num_layers ∈ {2, 4}, loss=smooth_l1 → 6 trials
-#   walt_mse_anchor.yaml — 1 trial: MSE at lr=2e-4, num_layers=2 (baseline vs Huber grid)
+#   walt_sweep.yaml — grid loss × LR × batch_size → 12 trials (see YAML)
+#   walt_mse_anchor.yaml — 1 trial: optional MSE-only quick baseline (overlaps loss=mse in walt_sweep)
 #   torchrun --nproc_per_node=1 (see YAML command:)
 #
 #SBATCH --job-name=brna-sweep

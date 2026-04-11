@@ -1,12 +1,18 @@
-# W&B sweep: grid learning_rate × num_layers (6 trials), loss locked to smooth_l1.
-# Prior 6-run sweep: smooth_l1 beat mse on val_mse; LR refined around 2e-4.
-# One MSE comparison run: use sweeps/walt_mse_anchor.yaml (1 trial at lr=2e-4, layers=2).
+# W&B sweep — grid (12 trials).
+#   loss × learning_rate × batch_size = 2 × 3 × 2 = 12
 #
-# Fixed: hidden_dim=320, ffn_dim=1536, batch_size=4, loss=smooth_l1,
+# Swept:
+#   loss: mse | smooth_l1
+#   learning_rate: 1.8e-4, 2e-4, 2.2e-4
+#   batch_size: 2, 4
+#
+# Fixed (prior anchor): num_layers=2, hidden_dim=320, ffn_dim=1536,
 #   weight_decay=0, mask_ratio=0.15, ree_base=100, feature_type=favor+.
-# Metric: val_mse (logged every epoch in train.py).
+# Metric: val_mse (train.py).
 #
-# Create sweep (laptop or Savio login):
+# Optional: sweeps/walt_mse_anchor.yaml — single MSE trial (redundant with loss=mse here).
+#
+# Create sweep (new ID after any YAML edit):
 #   wandb sweep --project bridge-rna sweeps/walt_sweep.yaml
 # Then: export WANDB_SWEEP_ID=... && sbatch --export=ALL scripts/savio_wandb_sweep_agent.slurm
 #
@@ -20,7 +26,7 @@ metric:
 
 parameters:
   batch_size:
-    value: 4
+    values: [2, 4]
   learning_rate:
     values: [0.00018, 0.0002, 0.00022]
   weight_decay:
@@ -30,7 +36,7 @@ parameters:
   ffn_dim:
     value: 1536
   num_layers:
-    values: [2, 4]
+    value: 2
   hidden_dim:
     value: 320
   ree_base:
@@ -38,9 +44,9 @@ parameters:
   feature_type:
     value: favor+
   loss:
-    value: smooth_l1
+    values: [mse, smooth_l1]
 
-# Single-GPU: no NCCL / uneven streaming skew across ranks.
+# Single-GPU: avoids multi-rank NCCL issues on streaming.
 command:
   - ${env}
   - torchrun

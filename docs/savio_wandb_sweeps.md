@@ -2,8 +2,8 @@
 
 This repo includes:
 
-- **`sweeps/walt_sweep.yaml`** — grid **`learning_rate`** ∈ `{1.8e-4, 2e-4, 2.2e-4}` × **`num_layers`** ∈ `{2, 4}`, **`loss` locked to `smooth_l1`** (6 trials). Other knobs fixed (see YAML).
-- **`sweeps/walt_mse_anchor.yaml`** — **one** trial: **`mse`** at **`lr=2e-4`**, **`num_layers=2`**, to keep a single MSE baseline for **`val_mse`** comparison without a full MSE grid.
+- **`sweeps/walt_sweep.yaml`** — grid **`loss`** ∈ `{mse, smooth_l1}` × **`learning_rate`** ∈ `{1.8e-4, 2e-4, 2.2e-4}` × **`batch_size`** ∈ `{2, 4}` → **12** trials. **`num_layers=2`**, **`hidden_dim=320`**, **`ffn_dim=1536`**, and other knobs fixed (see YAML).
+- **`sweeps/walt_mse_anchor.yaml`** — **one** trial: **`mse`** at **`lr=2e-4`**, **`num_layers=2`** — optional quick baseline; **`mse`** is already covered inside **`walt_sweep.yaml`**.
 
 Both use **`torchrun --nproc_per_node=1`** (single GPU). **`val_mse`** is the sweep metric (logged every epoch in `train.py`).
 
@@ -47,7 +47,7 @@ mkdir -p logs
 sbatch --export=ALL scripts/savio_wandb_sweep_agent.slurm
 ```
 
-Submit **several** jobs with the **same** `WANDB_SWEEP_ID` to run trials in parallel (up to your fair-share / queue limits). **`walt_sweep.yaml`** has **6** trials (`3 × 2`); **`walt_mse_anchor.yaml`** has **1** trial (create a separate sweep and run one agent).
+Submit **several** jobs with the **same** `WANDB_SWEEP_ID` to run trials in parallel (up to your fair-share / queue limits). **`walt_sweep.yaml`** has **12** trials; **`walt_mse_anchor.yaml`** has **1** trial (create a separate sweep and run one agent).
 
 ## 3. Notes
 

@@ -634,8 +634,12 @@ def get_sample_indices(batch_dir, train_subset=None, val_subset=None, balanced_s
     if verbose:
         print(f"[DEBUG] Found {len(batch_files)} batch files")
     
-    # Load metadata to track species per sample
-    metadata_file = batch_dir.parent / "samples.json"
+    # Load metadata to track species per sample.
+    # Preprocessing layout: data_dir/batch_files/*.parquet + data_dir/samples.json (parent of batch_dir).
+    # Flat layout: data_dir/*.parquet + data_dir/samples.json (same dir as parquets).
+    metadata_file = batch_dir / "samples.json"
+    if not metadata_file.exists():
+        metadata_file = batch_dir.parent / "samples.json"
     sample_to_species = {}
     if metadata_file.exists():
         with open(metadata_file) as f:
@@ -660,7 +664,9 @@ def get_sample_indices(batch_dir, train_subset=None, val_subset=None, balanced_s
     # New preprocessing saves sample-major batch files, so sample IDs are parquet index.
     all_samples = []  # [(batch_idx, sample_in_batch, species), ...]
 
-    manifest_path = batch_dir.parent / "batch_manifest.json"
+    manifest_path = batch_dir / "batch_manifest.json"
+    if not manifest_path.exists():
+        manifest_path = batch_dir.parent / "batch_manifest.json"
     if manifest_path.exists():
         with open(manifest_path) as f:
             batch_manifest = json.load(f)
