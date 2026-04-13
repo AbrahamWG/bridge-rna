@@ -1,0 +1,23 @@
+# W&B sweep agents — submitted 2026-04-11 (Savio)
+# Sweep: https://wandb.ai/abraham_guan-ucb/bridge-rna/sweeps/p8f4tirb
+# WANDB_SWEEP_ID=abraham_guan-ucb/bridge-rna/p8f4tirb
+
+# Slurm job IDs (12 × sbatch savio_wandb_sweep_agent.slurm)
+33350347
+33350348
+33350349
+33350350
+33350351
+33350352
+33350353
+33350354
+33350355
+33350356
+33350357
+33350358
+
+# Tomorrow — check completion:
+#   sacct -j 33350347,33350348,33350349,33350350,33350351,33350352,33350353,33350354,33350355,33350356,33350357,33350358 --format=JobID,State,ExitCode,Elapsed
+#
+# Logs:
+#   tail logs/slurm-<JOBID>.out
