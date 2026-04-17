@@ -54,7 +54,7 @@ export BRIDGE_RNA_HIDDEN_DIM="${BRIDGE_RNA_HIDDEN_DIM:-128}"
 
 export BRIDGE_RNA_CHECKPOINT_DIR="${SLURM_SUBMIT_DIR}/checkpoints_smoke_${SLURM_JOB_ID}"
 
-export WANDB_PROJECT="${WANDB_PROJECT:-bridge-rna-smoke}"
+export WANDB_PROJECT="${WANDB_PROJECT:-bridge-rna}"
 export WANDB_RUN_NAME="${WANDB_RUN_NAME:-smoke-1080ti-${SLURM_JOB_ID}}"
 
 if [[ -z "${WANDB_API_KEY:-}" ]] && [[ ! -f "${HOME}/.netrc" ]]; then
