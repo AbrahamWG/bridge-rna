@@ -167,6 +167,10 @@ CONFIG = {
     'val_subset': 2000,
     'balanced_sampling': True,
     'data_dir': './data/archs4/train_orthologs',
+    # Path to joint_vocab.csv (token_id, gene_id). Required for joint human+mouse training
+    # so all parquets are read with the same 15,523-gene column list regardless of per-file schema.
+    # Leave None to infer gene columns from the first parquet (single-species mode).
+    'vocab_file': None,
     'checkpoint_dir': './checkpoints_performer',
     # Masked reconstruction: 'mse' or 'smooth_l1' (Huber / SmoothL1; less sensitive to outliers)
     'loss': 'mse',
@@ -336,7 +340,7 @@ class StreamingParquetMLMDataset(Dataset):
 
     def __init__(self, batch_dir, sample_indices, normalization='tpm', mask_ratio=0.15,
                  mask_token=-10, cache_size=16, rank=0, world_size=1,
-                 ddp_file_split=True):
+                 ddp_file_split=True, vocab_file=None):
         self.batch_dir = Path(batch_dir)
         self.batch_files = sorted(self.batch_dir.glob("*.parquet"))
         self.rank = int(rank)
@@ -381,8 +385,14 @@ class StreamingParquetMLMDataset(Dataset):
             key = (batch_idx, rg_idx)
             self.group_to_indices.setdefault(key, []).append(i)
 
-        # Keep only numeric gene columns in the streaming hot path (skip string IDs).
-        self._gene_columns = _parquet_numeric_gene_columns(first_pf.schema_arrow)
+        # Gene column list: use explicit vocab file for joint training (ensures all parquets
+        # are read with the same 15,523-gene slice regardless of per-file schema differences),
+        # or fall back to inferring numeric columns from the first parquet.
+        if vocab_file is not None:
+            vocab_df = pd.read_csv(vocab_file)
+            self._gene_columns = vocab_df["gene_id"].tolist()
+        else:
+            self._gene_columns = _parquet_numeric_gene_columns(first_pf.schema_arrow)
         self.num_genes = len(self._gene_columns)
         self.num_mask = max(1, int(self.num_genes * self.mask_ratio))
 
@@ -857,8 +867,10 @@ def load_batch_data(batch_dir, sample_indices, normalization='tpm', verbose=True
     return result
 
 
-def get_num_genes_from_batches(batch_dir):
-    """Infer number of genes from sample-major batch parquet shape."""
+def get_num_genes_from_batches(batch_dir, vocab_file=None):
+    """Return gene count: from vocab_file if provided, else infer from first parquet schema."""
+    if vocab_file is not None:
+        return len(pd.read_csv(vocab_file))
     batch_files = sorted(Path(batch_dir).glob("*.parquet"))
     if not batch_files:
         raise FileNotFoundError(f"No parquet files found in {batch_dir}")
@@ -947,6 +959,10 @@ def _apply_runtime_env_config():
     data_dir = os.environ.get("BRIDGE_RNA_DATA_DIR")
     if data_dir:
         CONFIG["data_dir"] = data_dir.strip()
+
+    vocab_file = os.environ.get("BRIDGE_RNA_VOCAB_FILE")
+    if vocab_file:
+        CONFIG["vocab_file"] = vocab_file.strip()
 
     ckpt_dir = os.environ.get("BRIDGE_RNA_CHECKPOINT_DIR")
     if ckpt_dir:
@@ -1115,6 +1131,7 @@ def main():
         if is_main:
             print("\n[DATA] Using streaming mode (on-the-fly parquet reads)", flush=True)
 
+        vocab_file = CONFIG.get('vocab_file') or None
         train_ds = StreamingParquetMLMDataset(
             batch_dir,
             train_indices,
@@ -1125,6 +1142,7 @@ def main():
             rank=rank,
             world_size=world_size,
             ddp_file_split=True,
+            vocab_file=vocab_file,
         )
         val_ds = StreamingParquetMLMDataset(
             batch_dir,
@@ -1136,8 +1154,9 @@ def main():
             rank=rank,
             world_size=world_size,
             ddp_file_split=True,
+            vocab_file=vocab_file,
         )
-        num_genes = get_num_genes_from_batches(batch_dir)
+        num_genes = get_num_genes_from_batches(batch_dir, vocab_file=vocab_file)
     else:
         if is_main:
             print("\n[DATA] Loading training data into memory...", flush=True)

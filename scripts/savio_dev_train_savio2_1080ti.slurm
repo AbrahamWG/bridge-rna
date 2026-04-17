@@ -55,11 +55,13 @@ module load anaconda3/2024.10-1-11.4
 eval "$(conda shell.bash hook)"
 conda activate bridge-rna
 
-export BRIDGE_RNA_DATA_DIR="${BRIDGE_RNA_DATA_DIR:-/global/scratch/users/abrahamguan/bridge-rna-smoke-data}"
+export BRIDGE_RNA_DATA_DIR="${BRIDGE_RNA_DATA_DIR:-/global/scratch/users/abrahamguan/archs4_joint}"
 if [[ ! -d "$BRIDGE_RNA_DATA_DIR" ]]; then
   echo "ERROR: BRIDGE_RNA_DATA_DIR is not a directory: $BRIDGE_RNA_DATA_DIR" >&2
   exit 1
 fi
+# Joint human+mouse vocab (15,523 ENSMUSG IDs). Required when DATA_DIR mixes human/mouse parquets.
+export BRIDGE_RNA_VOCAB_FILE="${BRIDGE_RNA_VOCAB_FILE:-/global/scratch/users/abrahamguan/joint_vocab.csv}"
 
 # Not smoke: uses full CONFIG defaults unless overridden below.
 export BRIDGE_RNA_SMOKE=0
@@ -95,6 +97,7 @@ echo "BRIDGE_RNA_FEATURE_TYPE=${BRIDGE_RNA_FEATURE_TYPE} BRIDGE_RNA_WEIGHT_DECAY
 echo "BRIDGE_RNA_LOSS=${BRIDGE_RNA_LOSS} BRIDGE_RNA_HUBER_BETA=${BRIDGE_RNA_HUBER_BETA}"
 echo "BRIDGE_RNA_LEARNING_RATE=${BRIDGE_RNA_LEARNING_RATE}"
 echo "BRIDGE_RNA_DATA_DIR=${BRIDGE_RNA_DATA_DIR}"
+echo "BRIDGE_RNA_VOCAB_FILE=${BRIDGE_RNA_VOCAB_FILE}"
 echo "WANDB_PROJECT=${WANDB_PROJECT} WANDB_DIR=${WANDB_DIR}"
 
 # Reduce fragmentation OOMs on tight GPUs (PyTorch 2.x+).

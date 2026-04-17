@@ -42,6 +42,9 @@ if [[ ! -d "$BRIDGE_RNA_DATA_DIR" ]]; then
   exit 1
 fi
 
+# Joint human+mouse vocab (15,523 ENSMUSG IDs). Required when DATA_DIR mixes human/mouse parquets.
+export BRIDGE_RNA_VOCAB_FILE="${BRIDGE_RNA_VOCAB_FILE:-/global/scratch/users/abrahamguan/joint_vocab.csv}"
+
 export BRIDGE_RNA_SMOKE=1
 export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-32}"
 export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-8}"
@@ -60,6 +63,7 @@ fi
 
 echo "PYTHONPATH=${PYTHONPATH}"
 echo "BRIDGE_RNA_DATA_DIR=${BRIDGE_RNA_DATA_DIR}"
+echo "BRIDGE_RNA_VOCAB_FILE=${BRIDGE_RNA_VOCAB_FILE}"
 echo "WANDB_PROJECT=${WANDB_PROJECT} WANDB_DIR=${WANDB_DIR}"
 
 torchrun --standalone --nproc_per_node=1 train.py
