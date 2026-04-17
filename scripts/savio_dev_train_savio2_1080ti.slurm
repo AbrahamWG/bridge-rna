@@ -20,7 +20,7 @@
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
 # Temporary mitigation: flaky GPU visibility / CUDA init on some hosts (see project_state.md).
-#SBATCH --exclude=n0227.savio2,n0228.savio2,n0302.savio2
+#SBATCH --exclude=n0227.savio2,n0228.savio2,n0302.savio2,n0298.savio2
 # 1 GPU only — 2-GPU DDP consistently crashes on savio2_1080ti (NCCL desync / OOM).
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
