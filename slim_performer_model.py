@@ -501,16 +501,29 @@ class MultiHeadAttention(torch.nn.Module):
 
 
 def _sample_orth_matrix(size, device):
-  """Samples orthogonal matrix to reduce variance for random features."""
-  subspace = torch.randn(size, size, device=device)
-  subspace = torch.tril(subspace)
-  subspace = subspace / torch.sqrt((subspace**2).sum(0, keepdim=True))
+  """Samples orthogonal matrix to reduce variance for random features.
 
-  S = torch.triu(subspace.T.mm(subspace)) - 0.5 * torch.eye(
-      subspace.shape[1], device=device)
+  Rare random draws make ``S`` singular → ``torch.inverse`` fails. Resample instead of
+  crashing a long training run (seen on Savio human sweep, cosmic-sweep-2).
+  """
+  max_attempts = 32
+  last_err = None
+  for _ in range(max_attempts):
+    try:
+      subspace = torch.randn(size, size, device=device)
+      subspace = torch.tril(subspace)
+      subspace = subspace / torch.sqrt((subspace**2).sum(0, keepdim=True))
 
-  result = torch.eye(
-      subspace.shape[0], device=device) - subspace.mm(torch.inverse(S)).mm(
-          subspace.T)
+      S = torch.triu(subspace.T.mm(subspace)) - 0.5 * torch.eye(
+          subspace.shape[1], device=device)
 
-  return result
+      result = torch.eye(
+          subspace.shape[0], device=device) - subspace.mm(torch.inverse(S)).mm(
+              subspace.T)
+      return result
+    except RuntimeError as e:
+      last_err = e
+      continue
+  raise RuntimeError(
+      f"_sample_orth_matrix failed after {max_attempts} attempts (singular S?)"
+  ) from last_err
