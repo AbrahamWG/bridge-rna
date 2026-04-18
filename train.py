@@ -47,6 +47,7 @@ import bisect
 import contextlib
 
 import numpy as np
+from scipy.stats import pearsonr, spearmanr
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -1377,6 +1378,8 @@ def main():
     # Previous epoch validation metrics (for log context on train progress lines)
     prev_val_loss = None
     prev_val_mse = None
+    prev_val_pearson = None
+    prev_val_spearman = None
 
     run_metadata = {
         'run_id': run_id,
@@ -1481,6 +1484,11 @@ def main():
                             f" | prev_epoch val_loss: {prev_val_loss:.6f} "
                             f"val_mse: {prev_val_mse:.6f}"
                         )
+                        if prev_val_pearson is not None:
+                            prev_str += (
+                                f" val_pearson: {prev_val_pearson:.4f}"
+                                f" val_spearman: {prev_val_spearman:.4f}"
+                            )
                     print(
                         f"  Epoch {epoch+1}/{CONFIG['epochs']} | "
                         f"Batch {done}/{total_b} | "
@@ -1494,6 +1502,8 @@ def main():
         model.eval()
         val_loss = 0.0
         val_mse_sum = 0.0  # always MSE for apples-to-apples across loss types
+        val_pearson_sum = 0.0
+        val_spearman_sum = 0.0
         val_batches = 0
         hb = float(CONFIG.get('huber_beta', 1.0))
 
@@ -1507,6 +1517,8 @@ def main():
 
                     loss_parts = []
                     mse_parts = []
+                    pearson_parts = []
+                    spearman_parts = []
                     for i in range(len(x_masked)):
                         idxs = mask_idx[i]
                         if len(idxs) > 0:
@@ -1514,10 +1526,20 @@ def main():
                                 _masked_gene_loss(pred[i], x_true[i], idxs, CONFIG.get('loss', 'mse'), hb)
                             )
                             mse_parts.append(F.mse_loss(pred[i, idxs], x_true[i, idxs]))
+                            pi_np = pred[i, idxs].detach().cpu().float().numpy()
+                            ti_np = x_true[i, idxs].cpu().float().numpy()
+                            pr = pearsonr(pi_np, ti_np)[0]
+                            sr = spearmanr(pi_np, ti_np)[0]
+                            if np.isfinite(pr):
+                                pearson_parts.append(float(pr))
+                            if np.isfinite(sr):
+                                spearman_parts.append(float(sr))
 
                     if loss_parts:
                         val_loss += torch.stack(loss_parts).mean().item()
                         val_mse_sum += torch.stack(mse_parts).mean().item()
+                        val_pearson_sum += float(np.mean(pearson_parts)) if pearson_parts else 0.0
+                        val_spearman_sum += float(np.mean(spearman_parts)) if spearman_parts else 0.0
                         val_batches += 1
 
                     # Running val metrics here are only meaningful on single-GPU (full val set on one rank).
@@ -1529,22 +1551,31 @@ def main():
                     ):
                         rv = val_loss / max(1, val_batches)
                         rm = val_mse_sum / max(1, val_batches)
+                        rp = val_pearson_sum / max(1, val_batches)
+                        rs = val_spearman_sum / max(1, val_batches)
                         print(
                             f"  [VAL] Epoch {epoch+1}/{CONFIG['epochs']} | "
                             f"batch {vbi+1}/{n_val_batches} | "
-                            f"run val_loss: {rv:.6f} | run val_mse: {rm:.6f}",
+                            f"run val_loss: {rv:.6f} | run val_mse: {rm:.6f} | "
+                            f"run val_pearson: {rp:.4f} | run val_spearman: {rs:.4f}",
                             flush=True,
                         )
 
         # Sync validation across ranks
         vl = torch.tensor(val_loss, device=device)
         vm = torch.tensor(val_mse_sum, device=device)
+        vp = torch.tensor(val_pearson_sum, device=device)
+        vs = torch.tensor(val_spearman_sum, device=device)
         vb = torch.tensor(float(val_batches), device=device)
         dist.all_reduce(vl, op=dist.ReduceOp.SUM)
         dist.all_reduce(vm, op=dist.ReduceOp.SUM)
+        dist.all_reduce(vp, op=dist.ReduceOp.SUM)
+        dist.all_reduce(vs, op=dist.ReduceOp.SUM)
         dist.all_reduce(vb, op=dist.ReduceOp.SUM)
         epoch_val_loss = (vl / vb.clamp(min=1)).item()
         epoch_val_mse = (vm / vb.clamp(min=1)).item()
+        epoch_val_pearson = (vp / vb.clamp(min=1)).item()
+        epoch_val_spearman = (vs / vb.clamp(min=1)).item()
 
         train_losses.append(epoch_train_loss)
         val_losses.append(epoch_val_loss)
@@ -1557,6 +1588,8 @@ def main():
                 'train_loss': epoch_train_loss,
                 'val_loss': epoch_val_loss,
                 'val_mse': epoch_val_mse,
+                'val_pearson': epoch_val_pearson,
+                'val_spearman': epoch_val_spearman,
                 'lr': scheduler.get_last_lr()[0],
             }
             wandb.log(log_dict)
@@ -1570,8 +1603,10 @@ def main():
             print(f"\n  ╔════════════════════════════════════════════╗")
             print(f"  ║ Epoch {epoch+1}/{CONFIG['epochs']}")
             print(f"  ║ Train Loss: {epoch_train_loss:.6f}")
-            print(f"  ║ Val Loss:   {epoch_val_loss:.6f}  ({CONFIG.get('loss', 'mse')})")
-            print(f"  ║ Val MSE:    {epoch_val_mse:.6f}  (for comparing runs)")
+            print(f"  ║ Val Loss:     {epoch_val_loss:.6f}  ({CONFIG.get('loss', 'mse')})")
+            print(f"  ║ Val MSE:      {epoch_val_mse:.6f}  (for comparing runs)")
+            print(f"  ║ Val Pearson:  {epoch_val_pearson:.4f}")
+            print(f"  ║ Val Spearman: {epoch_val_spearman:.4f}")
             if prev_val_loss is not None:
                 print(
                     f"  ║ Δ vs prev:  val_loss {epoch_val_loss - prev_val_loss:+.6f}  "
@@ -1585,6 +1620,8 @@ def main():
 
             prev_val_loss = epoch_val_loss
             prev_val_mse = epoch_val_mse
+            prev_val_pearson = epoch_val_pearson
+            prev_val_spearman = epoch_val_spearman
 
             checkpoint_payload = {
                 'model_state_dict': model_sd,
