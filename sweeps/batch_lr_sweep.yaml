@@ -1,0 +1,63 @@
+# W&B sweep — grid: batch_size × learning_rate (9 trials).
+#   batch_size: 8, 16, 32
+#   learning_rate: 1e-4, 2e-4, 4e-4
+#
+# LR range is √-scaled from anchor (lr=2e-4 @ B=4):
+#   B=8:  √(8/4)  × 2e-4 ≈ 2.8e-4  → mid point 2e-4 (slight underscale, safe)
+#   B=16: √(16/4) × 2e-4 = 4e-4    → top of range hits the scaling target
+#   B=32: √(32/4) × 2e-4 ≈ 5.7e-4  → 4e-4 is still conservative, avoids instability
+# The original suggestion of 3e-4 max was too low for B=16/32.
+#
+# Fixed: data_mode=preload (loads 20k train + 4k val into RAM before training;
+#   eliminates NFS streaming bottleneck that caused 56h/epoch ETAs in streaming mode).
+#   num_workers=4 (CPU-parallel masking; safe in preload mode, forced to 0 in streaming).
+#   loss=mse, num_layers=2, hidden_dim=320, ffn_dim=1536, mask_ratio=0.15, feature_type=favor+.
+#
+# VRAM note: batch_size=32 is likely to OOM on 1080Ti (11GB).
+#   FFN activations alone at B=32 exceed ~12 GB. B=16 (~10 GB) is tight; B=8 (~5 GB) safe.
+#   Keep B=32 in the grid to confirm — the OOM result is itself informative.
+#
+# Create sweep:
+#   wandb sweep --project bridge-rna sweeps/batch_lr_sweep.yaml
+# Then: export WANDB_SWEEP_ID=... && for i in {1..9}; do sbatch --export=ALL scripts/savio_wandb_sweep_agent.slurm; done
+#
+# Metric: val_mse (always masked MSE on log(TPM), comparable across runs)
+
+program: train.py
+method: grid
+metric:
+  name: val_mse
+  goal: minimize
+
+parameters:
+  batch_size:
+    values: [8, 16, 32]
+  learning_rate:
+    values: [0.0001, 0.0002, 0.0004]
+  data_mode:
+    value: preload
+  num_workers:
+    value: 4
+  loss:
+    value: mse
+  weight_decay:
+    value: 0
+  mask_ratio:
+    value: 0.15
+  ffn_dim:
+    value: 1536
+  num_layers:
+    value: 2
+  hidden_dim:
+    value: 320
+  ree_base:
+    value: 100
+  feature_type:
+    value: favor+
+
+command:
+  - ${env}
+  - torchrun
+  - --standalone
+  - --nproc_per_node=1
+  - ${program}

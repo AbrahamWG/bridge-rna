@@ -816,31 +816,38 @@ def get_sample_indices(batch_dir, train_subset=None, val_subset=None, balanced_s
     return train_indices, val_indices
 
 
-def load_batch_data(batch_dir, sample_indices, normalization='tpm', verbose=True):
+def load_batch_data(batch_dir, sample_indices, normalization='tpm', vocab_file=None, verbose=True):
     """
     Load selected samples from batch parquet files into a single numpy array.
-    
+
     Args:
         batch_dir: Path to directory with batch parquet files
         sample_indices: List of (batch_idx, sample_idx_in_batch) tuples
         normalization: 'tpm' or 'log1p_tpm'
+        vocab_file: Path to joint_vocab.csv; if set, fixes gene column list (required for
+                    joint human+mouse training where parquets have different schemas)
         verbose: Print progress
-    
+
     Returns:
         numpy array of shape [num_samples, num_genes]
     """
     batch_dir = Path(batch_dir)
     batch_files = sorted(batch_dir.glob("*.parquet"))
-    
+
     # Group samples by batch file for efficient loading
     from collections import defaultdict
     batch_to_samples = defaultdict(list)
     for idx, (batch_idx, sample_in_batch) in enumerate(sample_indices):
         batch_to_samples[batch_idx].append((idx, sample_in_batch))
-    
+
     # Pre-allocate output array (sample-major parquet: [samples, genes]).
-    first_pf = pq.ParquetFile(str(batch_files[0]))
-    gene_cols = _parquet_numeric_gene_columns(first_pf.schema_arrow)
+    # Use vocab_file for joint training to enforce the shared 15,523-gene column list;
+    # otherwise fall back to inferring numeric columns from the first parquet schema.
+    if vocab_file is not None:
+        gene_cols = pd.read_csv(vocab_file)["gene_id"].tolist()
+    else:
+        first_pf = pq.ParquetFile(str(batch_files[0]))
+        gene_cols = _parquet_numeric_gene_columns(first_pf.schema_arrow)
     num_genes = len(gene_cols)
     result = np.empty((len(sample_indices), num_genes), dtype=np.float32)
     
@@ -1158,15 +1165,18 @@ def main():
         )
         num_genes = get_num_genes_from_batches(batch_dir, vocab_file=vocab_file)
     else:
+        vocab_file = CONFIG.get('vocab_file') or None
         if is_main:
             print("\n[DATA] Loading training data into memory...", flush=True)
         X_train = load_batch_data(batch_dir, train_indices,
                                   normalization=CONFIG['normalization'],
+                                  vocab_file=vocab_file,
                                   verbose=is_main)
         if is_main:
             print("[DATA] Loading validation data into memory...", flush=True)
         X_val = load_batch_data(batch_dir, val_indices,
                                 normalization=CONFIG['normalization'],
+                                vocab_file=vocab_file,
                                 verbose=is_main)
 
         num_genes = X_train.shape[1]
