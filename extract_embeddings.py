@@ -41,7 +41,9 @@ import pyarrow.parquet as pq
 def load_model(checkpoint_path: str, device: torch.device):
     ckpt = torch.load(checkpoint_path, map_location=device)
     cfg = ckpt['config']
-    num_genes = cfg.get('num_genes') or ckpt.get('run_metadata', {}).get('num_genes')
+    num_genes = (cfg.get('num_genes')
+                 or ckpt.get('run_metadata', {}).get('num_genes')
+                 or ckpt.get('run_metadata', {}).get('dataset', {}).get('num_genes'))
     if num_genes is None:
         raise ValueError("Cannot determine num_genes from checkpoint.")
 
