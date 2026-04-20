@@ -1,5 +1,6 @@
 #!/bin/bash
-# Longer dev run: joint human+mouse, 20k/4k subsets, 10 epochs, 1 GPU (2-GPU DDP crashes on 1080Ti).
+# Longer dev run: joint human+mouse, 20k/4k subsets, 10 epochs, up to 4-GPU DDP.
+# Safe with data_mode=preload: all ranks load equal batches upfront → no NCCL desync.
 # Same partition/account as savio_smoke_train_savio2_1080ti.slurm.
 #
 # Submit from repo root:
@@ -12,20 +13,19 @@
 # Joint human+mouse: DATA_DIR=archs4_joint (106 human + 115 mouse), VOCAB_FILE=joint_vocab.csv.
 # Sampling is ~50/50 human:mouse by row count across files.
 # Best anchor config: hidden=320, ffn=1536, layers=2, favor+, mask=0.15, lr=2e-4, loss=mse.
-# Per-GPU batch (default 4; on OOM retry with BRIDGE_RNA_BATCH_SIZE=2).
+# Per-GPU batch (default 8; validated in batch_lr sweep 66o78upl on 1080Ti).
 # Full data: BRIDGE_RNA_USE_ALL_SAMPLES=1.
 #
 #SBATCH --job-name=bridge-rna-dev-1080ti
 #SBATCH --account=ic_cdss170
 #SBATCH --partition=savio2_1080ti
 #SBATCH --qos=savio_normal
-# Temporary mitigation: flaky GPU visibility / CUDA init on some hosts (see project_state.md).
+# Flaky nodes excluded (hardware/CUDA failures confirmed 2026-04-18).
 #SBATCH --exclude=n0227.savio2,n0228.savio2,n0302.savio2,n0298.savio2
-# 1 GPU only — 2-GPU DDP consistently crashes on savio2_1080ti (NCCL desync / OOM).
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #STRICT: use --mem=60G, not 64G (see project_state.md).
 #SBATCH --mem=60G
 #SBATCH --time=24:00:00
@@ -61,7 +61,9 @@ export BRIDGE_RNA_EPOCHS="${BRIDGE_RNA_EPOCHS:-10}"
 export BRIDGE_RNA_USE_ALL_SAMPLES="${BRIDGE_RNA_USE_ALL_SAMPLES:-0}"
 export BRIDGE_RNA_TRAIN_SUBSET="${BRIDGE_RNA_TRAIN_SUBSET:-20000}"
 export BRIDGE_RNA_VAL_SUBSET="${BRIDGE_RNA_VAL_SUBSET:-4000}"
-export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-4}"
+export BRIDGE_RNA_BATCH_SIZE="${BRIDGE_RNA_BATCH_SIZE:-8}"
+export BRIDGE_RNA_DATA_MODE="${BRIDGE_RNA_DATA_MODE:-preload}"
+export BRIDGE_RNA_NUM_WORKERS="${BRIDGE_RNA_NUM_WORKERS:-4}"
 # Best anchor hyperparams from walt sweep.
 export BRIDGE_RNA_LOSS="${BRIDGE_RNA_LOSS:-mse}"
 export BRIDGE_RNA_HUBER_BETA="${BRIDGE_RNA_HUBER_BETA:-1.0}"
@@ -90,7 +92,7 @@ echo "WANDB_PROJECT=${WANDB_PROJECT} WANDB_DIR=${WANDB_DIR}"
 # Reduce fragmentation OOMs on tight GPUs (PyTorch 2.x+).
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-# Single GPU — avoids NCCL crashes that plague 2-GPU jobs on savio2_1080ti.
+# Dynamic GPU count — use all visible GPUs up to 4 (preload mode ensures equal batches).
 VISIBLE_GPUS="$(python - <<'PY'
 import torch
 print(torch.cuda.device_count())
@@ -101,6 +103,8 @@ if [[ "${VISIBLE_GPUS}" -lt 1 ]]; then
   echo "ERROR: No CUDA devices visible to PyTorch; aborting." >&2
   exit 1
 fi
-torchrun --standalone --nproc_per_node=1 train.py
+NPROC=$(( VISIBLE_GPUS < 4 ? VISIBLE_GPUS : 4 ))
+echo "Launching torchrun with nproc_per_node=${NPROC}"
+torchrun --standalone --nproc_per_node="${NPROC}" train.py
 
 echo "Done dev job ${SLURM_JOB_ID}"

@@ -266,6 +266,29 @@ class ExpressionPerformer(nn.Module):
         # Output: predict single expression value per gene
         self.output_map = nn.Linear(hidden_dim, 1)
 
+    def _hidden_states(self, x):
+        """Shared encoder: returns h [B, G, hidden_dim] after all transformer layers."""
+        B, G = x.shape
+        device = x.device
+        gene_ids = torch.arange(G, device=device)
+        gene_emb = self.gene_embedding(gene_ids)
+        ree_emb = self.ree(x)
+        h = gene_emb.unsqueeze(0) + ree_emb
+        for layer in self.layers:
+            rfs = layer.attention.sample_rfs(device)
+            h = layer.full_forward(h, rfs)
+        return h
+
+    def encode(self, x):
+        """
+        Extract mean-pooled representation for downstream tasks.
+        Args:
+            x: [batch, num_genes] expression values (no masking)
+        Returns:
+            [batch, hidden_dim] sample embeddings
+        """
+        return self._hidden_states(x).mean(dim=1)
+
     def forward(self, x):
         """
         Args:
