@@ -32,6 +32,7 @@ python extract_embeddings.py \
   --osdr_space /global/scratch/users/kmeng/osdr_data/osdr_processed_spaceflight.csv \
   --vocab_file /global/scratch/users/abrahamguan/joint_vocab.csv \
   --output embeddings.npz \
+  --batch_size 8 \
   --device cuda
 
 echo "Done. embeddings.npz saved."
